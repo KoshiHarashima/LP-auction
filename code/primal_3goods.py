@@ -9,6 +9,8 @@ Cursor.mdのAppendix仕様に基づく:
 
 import pulp
 import numpy as np
+import os
+from datetime import datetime
 
 
 def solve_mechanism_3goods_4synergy(points, weights, solver=None):
@@ -142,12 +144,9 @@ def solve_mechanism_3goods_4synergy(points, weights, solver=None):
     obj_val = pulp.value(prob.objective)
 
     # ========== 結果 ==========
-    # NumPy配列に直接変換して高速化
+    # NumPy配列に直接変換
     u_sol = np.array([u[j].varValue for j in range(J)], dtype=np.float64)
     p_sol = np.array([[p[(l, j)].varValue for j in range(J)] for l in range(7)], dtype=np.float64)
-    # リストに変換（互換性のため）
-    u_sol = u_sol.tolist()
-    p_sol = p_sol.tolist()
 
     return status, obj_val, u_sol, p_sol
 
@@ -327,10 +326,7 @@ def solve_mechanism_3goods_4synergy_iterative(points, weights, grid_size, solver
         if not violations:
             status = pulp.LpStatus[prob.status]
             obj_val = pulp.value(prob.objective)
-            # NumPy配列に直接変換してからリストに変換（高速化）
-            u_final = np.array([u[j].varValue for j in range(J)], dtype=np.float64).tolist()
-            p_final = np.array([[p[(l, j)].varValue for j in range(J)] for l in range(7)], dtype=np.float64).tolist()
-            return status, obj_val, u_final, p_final, iteration + 1
+            return status, obj_val, u_sol, p_sol, iteration + 1
         
         # 違反している制約を追加（バッチ処理で高速化）
         # NumPy配列から直接取得して高速化
@@ -348,8 +344,107 @@ def solve_mechanism_3goods_4synergy_iterative(points, weights, grid_size, solver
     # 最大反復回数に達した場合
     status = pulp.LpStatus[prob.status]
     obj_val = pulp.value(prob.objective)
-    # NumPy配列に直接変換してからリストに変換（高速化）
-    u_final = np.array([u[j].varValue for j in range(J)], dtype=np.float64).tolist()
-    p_final = np.array([[p[(l, j)].varValue for j in range(J)] for l in range(7)], dtype=np.float64).tolist()
-    return status, obj_val, u_final, p_final, max_iter
+    u_sol = np.array([u[j].varValue for j in range(J)], dtype=np.float64)
+    p_sol = np.array([[p[(l, j)].varValue for j in range(J)] for l in range(7)], dtype=np.float64)
+    return status, obj_val, u_sol, p_sol, max_iter
+
+
+def save_results_3goods(points, weights, u_sol, p_sol, obj_val, status,
+                        grid_size=None, n_iter=None, filename=None, data_dir="data"):
+    """
+    3財4シナジーの結果をNumPy形式で保存する。
+    
+    パラメータ:
+        points: 型空間の点 (list or np.ndarray)
+        weights: 各点の重み (list or np.ndarray)
+        u_sol: 効用 (np.ndarray, shape: (J,))
+        p_sol: 配分確率 (np.ndarray, shape: (7, J))
+        obj_val: 目的関数値 (float)
+        status: LPステータス (str)
+        grid_size: グリッドサイズ (int, optional)
+        n_iter: 反復回数 (int, optional)
+        filename: 保存ファイル名 (str, optional)
+        data_dir: データ保存ディレクトリ (str, default: "data")
+    
+    戻り値:
+        filepath: 保存されたファイルのパス (str)
+    """
+    os.makedirs(data_dir, exist_ok=True)
+    
+    if filename is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"results_3goods_4synergy_{timestamp}.npz"
+    
+    filepath = os.path.join(data_dir, filename)
+    
+    points_arr = np.array(points, dtype=np.float64)
+    weights_arr = np.array(weights, dtype=np.float64)
+    u_sol_arr = np.array(u_sol, dtype=np.float64)
+    p_sol_arr = np.array(p_sol, dtype=np.float64)
+    
+    save_dict = {
+        'points': points_arr,
+        'weights': weights_arr,
+        'u_sol': u_sol_arr,
+        'p_sol': p_sol_arr,
+        'obj_val': np.array([obj_val], dtype=np.float64) if obj_val is not None else np.array([np.nan], dtype=np.float64),
+        'J': np.array([len(points)], dtype=np.int32),
+    }
+    
+    if grid_size is not None:
+        save_dict['grid_size'] = np.array([grid_size], dtype=np.int32)
+    if n_iter is not None:
+        save_dict['n_iter'] = np.array([n_iter], dtype=np.int32)
+    
+    metadata_filepath = filepath.replace('.npz', '_metadata.txt')
+    with open(metadata_filepath, 'w') as f:
+        f.write(f"status: {status}\n")
+        f.write(f"obj_val: {obj_val}\n")
+        f.write(f"timestamp: {datetime.now().isoformat()}\n")
+        if grid_size is not None:
+            f.write(f"grid_size: {grid_size}\n")
+        if n_iter is not None:
+            f.write(f"n_iter: {n_iter}\n")
+    
+    np.savez_compressed(filepath, **save_dict)
+    print(f"Results saved to: {filepath}")
+    return filepath
+
+
+def load_results_3goods(filepath):
+    """
+    保存された結果を読み込む。
+    
+    パラメータ:
+        filepath: 保存されたファイルのパス (str)
+    
+    戻り値:
+        dict: 読み込んだデータの辞書
+    """
+    data = np.load(filepath, allow_pickle=True)
+    
+    result = {
+        'points': data['points'],
+        'weights': data['weights'],
+        'u_sol': data['u_sol'],
+        'p_sol': data['p_sol'],
+        'obj_val': float(data['obj_val'][0]) if not np.isnan(data['obj_val'][0]) else None,
+        'J': int(data['J'][0]),
+    }
+    
+    if 'grid_size' in data:
+        result['grid_size'] = int(data['grid_size'][0])
+    if 'n_iter' in data:
+        result['n_iter'] = int(data['n_iter'][0])
+    
+    metadata_filepath = filepath.replace('.npz', '_metadata.txt')
+    if os.path.exists(metadata_filepath):
+        with open(metadata_filepath, 'r') as f:
+            for line in f:
+                if line.startswith('status:'):
+                    result['status'] = line.split(':', 1)[1].strip()
+                elif line.startswith('timestamp:'):
+                    result['timestamp'] = line.split(':', 1)[1].strip()
+    
+    return result
 

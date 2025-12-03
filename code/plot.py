@@ -42,7 +42,36 @@ def classify_region(p_a, p_b, p_alpha, thresholds=[0.1, 0.5, 0.9]):
 
 def plot_polyhedral_regions(points_arr, p_arr, q_arr, title="Allocation Regions", 
                            figsize=(16, 12), thresholds=[0.1, 0.5, 0.9]):
-    """多面体領域を可視化する関数"""
+    """
+    多面体領域を可視化する関数
+    
+    パラメータ:
+        points_arr: 型空間の点 (np.ndarray, shape: (J, 3))
+        p_arr: 配分確率 (np.ndarray, shape: (3, J) または (J, 3))
+        q_arr: シナジーαの配分確率 (np.ndarray, shape: (J,))
+        title: プロットのタイトル (str)
+        figsize: 図のサイズ (tuple)
+        thresholds: 領域分類の閾値 (list)
+    
+    戻り値:
+        region_groups: 領域ごとの点のインデックスの辞書
+    """
+    # NumPy配列に変換
+    points_arr = np.array(points_arr, dtype=np.float64)
+    p_arr = np.array(p_arr, dtype=np.float64)
+    q_arr = np.array(q_arr, dtype=np.float64)
+    
+    # p_arrの形状を確認して調整
+    if p_arr.ndim == 2:
+        if p_arr.shape[0] == 3 and p_arr.shape[1] == len(points_arr):
+            # shape: (3, J) -> (J, 3)に変換
+            p_arr = p_arr.T
+        elif p_arr.shape[1] == 3 and p_arr.shape[0] == len(points_arr):
+            # shape: (J, 3) そのまま
+            pass
+        else:
+            raise ValueError(f"p_arrの形状が不正です: {p_arr.shape}, 期待される形状: (3, J) または (J, 3)")
+    
     # 色のマッピング
     region_colors = {
         'U{1,2,3}': (0.2, 0.2, 0.2, 0.8),
@@ -58,7 +87,7 @@ def plot_polyhedral_regions(points_arr, p_arr, q_arr, title="Allocation Regions"
     # 各点の領域を分類
     regions = []
     for i in range(len(points_arr)):
-        region = classify_region(p_arr[0][i], p_arr[1][i], q_arr[i], thresholds)
+        region = classify_region(p_arr[i, 0], p_arr[i, 1], q_arr[i], thresholds)
         regions.append(region)
     
     # 領域ごとに点をグループ化

@@ -9,6 +9,8 @@ Cursor.mdに基づく実装:
 
 import pulp
 import numpy as np
+import os
+from datetime import datetime
 
 
 def solve_mechanism_2agents(points1, weights1, points2, weights2, solver=None):
@@ -276,17 +278,11 @@ def solve_mechanism_2agents(points1, weights1, points2, weights2, solver=None):
     obj_val = pulp.value(prob.objective)
 
     # ========== 結果 ==========
-    # NumPy配列に直接変換して高速化
+    # NumPy配列に直接変換
     u1_sol = np.array([[u1[(j1, j2)].varValue for j2 in range(J2)] for j1 in range(J1)], dtype=np.float64)
     u2_sol = np.array([[u2[(j1, j2)].varValue for j2 in range(J2)] for j1 in range(J1)], dtype=np.float64)
     p1_sol = np.array([[[p1[(l, j1, j2)].varValue for j2 in range(J2)] for j1 in range(J1)] for l in range(3)], dtype=np.float64)
     p2_sol = np.array([[[p2[(l, j1, j2)].varValue for j2 in range(J2)] for j1 in range(J1)] for l in range(3)], dtype=np.float64)
-    
-    # リストに変換（互換性のため）
-    u1_sol = u1_sol.tolist()
-    u2_sol = u2_sol.tolist()
-    p1_sol = p1_sol.tolist()
-    p2_sol = p2_sol.tolist()
 
     return status, obj_val, u1_sol, u2_sol, p1_sol, p2_sol
 
@@ -586,11 +582,7 @@ def solve_mechanism_2agents_iterative(points1, weights1, grid_sizes1, points2, w
         if not violations1 and not violations2:
             status = pulp.LpStatus[prob.status]
             obj_val = pulp.value(prob.objective)
-            u1_final = u1_sol.tolist()
-            u2_final = u2_sol.tolist()
-            p1_final = p1_sol.tolist()
-            p2_final = p2_sol.tolist()
-            return status, obj_val, u1_final, u2_final, p1_final, p2_final, iteration + 1
+            return status, obj_val, u1_sol, u2_sol, p1_sol, p2_sol, iteration + 1
         
         # 違反している制約を追加
         for i1, k1, j2 in violations1:
@@ -620,9 +612,142 @@ def solve_mechanism_2agents_iterative(points1, weights1, grid_sizes1, points2, w
     # 最大反復回数に達した場合
     status = pulp.LpStatus[prob.status]
     obj_val = pulp.value(prob.objective)
-    u1_final = u1_sol.tolist()
-    u2_final = u2_sol.tolist()
-    p1_final = p1_sol.tolist()
-    p2_final = p2_sol.tolist()
-    return status, obj_val, u1_final, u2_final, p1_final, p2_final, max_iter
+    return status, obj_val, u1_sol, u2_sol, p1_sol, p2_sol, max_iter
+
+
+def save_results_2agents(
+    points1, weights1, points2, weights2,
+    u1_sol, u2_sol, p1_sol, p2_sol,
+    obj_val, status,
+    grid_sizes1=None, grid_sizes2=None, n_iter=None,
+    filename=None, data_dir="data"
+):
+    """
+    2人2財1シナジーの結果をNumPy形式で保存する。
+    
+    パラメータ:
+        points1: 参加者1の型空間の点 (list or np.ndarray)
+        weights1: 参加者1の各点の重み (list or np.ndarray)
+        points2: 参加者2の型空間の点 (list or np.ndarray)
+        weights2: 参加者2の各点の重み (list or np.ndarray)
+        u1_sol: 参加者1の効用 (np.ndarray, shape: (J1, J2))
+        u2_sol: 参加者2の効用 (np.ndarray, shape: (J1, J2))
+        p1_sol: 参加者1の配分確率 (np.ndarray, shape: (3, J1, J2))
+        p2_sol: 参加者2の配分確率 (np.ndarray, shape: (3, J1, J2))
+        obj_val: 目的関数値 (float)
+        status: LPステータス (str)
+        grid_sizes1: 参加者1のグリッドサイズ (tuple, optional)
+        grid_sizes2: 参加者2のグリッドサイズ (tuple, optional)
+        n_iter: 反復回数 (int, optional)
+        filename: 保存ファイル名 (str, optional, 指定しない場合は自動生成)
+        data_dir: データ保存ディレクトリ (str, default: "data")
+    
+    戻り値:
+        filepath: 保存されたファイルのパス (str)
+    """
+    # データディレクトリを作成
+    os.makedirs(data_dir, exist_ok=True)
+    
+    # ファイル名を生成
+    if filename is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"results_2agents_{timestamp}.npz"
+    
+    filepath = os.path.join(data_dir, filename)
+    
+    # NumPy配列に変換
+    points1_arr = np.array(points1, dtype=np.float64)
+    weights1_arr = np.array(weights1, dtype=np.float64)
+    points2_arr = np.array(points2, dtype=np.float64)
+    weights2_arr = np.array(weights2, dtype=np.float64)
+    u1_sol_arr = np.array(u1_sol, dtype=np.float64)
+    u2_sol_arr = np.array(u2_sol, dtype=np.float64)
+    p1_sol_arr = np.array(p1_sol, dtype=np.float64)
+    p2_sol_arr = np.array(p2_sol, dtype=np.float64)
+    
+    # NumPy形式で保存（メタデータも含める）
+    save_dict = {
+        'points1': points1_arr,
+        'weights1': weights1_arr,
+        'points2': points2_arr,
+        'weights2': weights2_arr,
+        'u1_sol': u1_sol_arr,
+        'u2_sol': u2_sol_arr,
+        'p1_sol': p1_sol_arr,
+        'p2_sol': p2_sol_arr,
+        'obj_val': np.array([obj_val], dtype=np.float64) if obj_val is not None else np.array([np.nan], dtype=np.float64),
+        'J1': np.array([len(points1)], dtype=np.int32),
+        'J2': np.array([len(points2)], dtype=np.int32),
+    }
+    
+    if grid_sizes1 is not None:
+        save_dict['grid_sizes1'] = np.array(grid_sizes1, dtype=np.int32)
+    if grid_sizes2 is not None:
+        save_dict['grid_sizes2'] = np.array(grid_sizes2, dtype=np.int32)
+    if n_iter is not None:
+        save_dict['n_iter'] = np.array([n_iter], dtype=np.int32)
+    
+    # メタデータファイルも保存（文字列情報用）
+    metadata_filepath = filepath.replace('.npz', '_metadata.txt')
+    with open(metadata_filepath, 'w') as f:
+        f.write(f"status: {status}\n")
+        f.write(f"obj_val: {obj_val}\n")
+        f.write(f"timestamp: {datetime.now().isoformat()}\n")
+        if grid_sizes1 is not None:
+            f.write(f"grid_sizes1: {grid_sizes1}\n")
+        if grid_sizes2 is not None:
+            f.write(f"grid_sizes2: {grid_sizes2}\n")
+        if n_iter is not None:
+            f.write(f"n_iter: {n_iter}\n")
+    
+    np.savez_compressed(filepath, **save_dict)
+    
+    print(f"Results saved to: {filepath}")
+    return filepath
+
+
+def load_results_2agents(filepath):
+    """
+    保存された結果を読み込む。
+    
+    パラメータ:
+        filepath: 保存されたファイルのパス (str)
+    
+    戻り値:
+        dict: 読み込んだデータの辞書
+    """
+    data = np.load(filepath, allow_pickle=True)
+    
+    result = {
+        'points1': data['points1'],
+        'weights1': data['weights1'],
+        'points2': data['points2'],
+        'weights2': data['weights2'],
+        'u1_sol': data['u1_sol'],
+        'u2_sol': data['u2_sol'],
+        'p1_sol': data['p1_sol'],
+        'p2_sol': data['p2_sol'],
+        'obj_val': float(data['obj_val'][0]) if not np.isnan(data['obj_val'][0]) else None,
+        'J1': int(data['J1'][0]),
+        'J2': int(data['J2'][0]),
+    }
+    
+    if 'grid_sizes1' in data:
+        result['grid_sizes1'] = tuple(data['grid_sizes1'])
+    if 'grid_sizes2' in data:
+        result['grid_sizes2'] = tuple(data['grid_sizes2'])
+    if 'n_iter' in data:
+        result['n_iter'] = int(data['n_iter'][0])
+    
+    # メタデータファイルから文字列情報を読み込む
+    metadata_filepath = filepath.replace('.npz', '_metadata.txt')
+    if os.path.exists(metadata_filepath):
+        with open(metadata_filepath, 'r') as f:
+            for line in f:
+                if line.startswith('status:'):
+                    result['status'] = line.split(':', 1)[1].strip()
+                elif line.startswith('timestamp:'):
+                    result['timestamp'] = line.split(':', 1)[1].strip()
+    
+    return result
 
