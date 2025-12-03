@@ -52,8 +52,14 @@ def solve_mechanism_3goods_4synergy(points, weights, solver=None):
         - p: list of lists, p[l][j] = 財lを型jに割り当てる確率 (l=0,...,6)
     """
     J = len(points)
-    assert J == len(weights)
-    assert len(points[0]) == 7, "pointsは7次元である必要があります (財a, 財b, 財c, α12, α23, α31, α123)"
+
+    # pointsとweightsをNumPy配列に変換（一度だけ、高速化のため）
+    points_arr = np.asarray(points, dtype=np.float64)  # (J, 7)
+    weights_arr = np.asarray(weights, dtype=np.float64)  # (J,)
+
+    # 差分行列を一括計算（ループ外で一度だけ）
+    # points_diff[i,j] = points[i] - points[j] (形状: (J, J, 7))
+    points_diff = points_arr[:, None, :] - points_arr[None, :, :]  # (J, J, 7)
 
     # 問題設定
     prob = pulp.LpProblem("RC_3goods_4synergy", pulp.LpMaximize)
@@ -78,9 +84,10 @@ def solve_mechanism_3goods_4synergy(points, weights, solver=None):
 
     # ========== 目的関数 ==========
     # Cursor.md: max Σ_j w[j] ((p(j)・x(j)) - u(j))
+    # 配列アクセスを使用して高速化
     objective = pulp.lpSum(
-        weights[j] * (
-            sum(p[(l, j)] * points[j][l] for l in range(7))  # 7次元ベクトルの内積
+        weights_arr[j] * (
+            sum(p[(l, j)] * points_arr[j, l] for l in range(7))  # 7次元ベクトルの内積
             - u[j]
         )
         for j in range(J)
@@ -96,14 +103,12 @@ def solve_mechanism_3goods_4synergy(points, weights, solver=None):
     # 変数の定義で既に lowBound=0.0, upBound=1.0 として設定済み
     
     # 3. 凸性制約: u_i ≥ u_j + p_j (x_i - x_j) for all i,j
-    # pointsをNumPy配列に変換（高速化のため）
-    points_arr = np.array(points, dtype=np.float64)  # (J, 7)
+    # 差分行列をキャッシュから参照して高速化
     for i in range(J):
-        x_i = points_arr[i]  # NumPy配列から直接取得
         for j in range(J):
-            x_j = points_arr[j]  # NumPy配列から直接取得
+            # 差分行列から直接参照（points_diff[i, j, :]）
             prob += u[i] >= u[j] + sum(
-                p[(l, j)] * (x_i[l] - x_j[l]) for l in range(7)
+                p[(l, j)] * points_diff[i, j, l] for l in range(7)
             ), f"convex_{i}_{j}"
     
     # 4. シナジーの配分制約
@@ -144,9 +149,12 @@ def solve_mechanism_3goods_4synergy(points, weights, solver=None):
     obj_val = pulp.value(prob.objective)
 
     # ========== 結果 ==========
-    # NumPy配列に直接変換
-    u_sol = np.array([u[j].varValue for j in range(J)], dtype=np.float64)
-    p_sol = np.array([[p[(l, j)].varValue for j in range(J)] for l in range(7)], dtype=np.float64)
+    # NumPy配列に直接変換（np.fromiterを使用してPythonループを削減）
+    u_sol = np.fromiter((u[j].varValue for j in range(J)), dtype=np.float64, count=J)
+    p_sol = np.array([
+        np.fromiter((p[(l, j)].varValue for j in range(J)), dtype=np.float64, count=J)
+        for l in range(7)
+    ], dtype=np.float64)
 
     return status, obj_val, u_sol, p_sol
 
@@ -174,14 +182,15 @@ def solve_mechanism_3goods_4synergy_iterative(points, weights, grid_size, solver
         (status_string, objective_value, u, p, n_iterations)
     """
     J = len(points)
-    assert J == len(weights)
-    assert len(points[0]) == 7, "pointsは7次元である必要があります"
-    
     n = grid_size
-    assert n ** 7 == J, f"grid_size^7({n ** 7})がpointsの数({J})と一致しません"
     
-    # pointsをNumPy配列に変換（一度だけ、高速化のため）
-    points_arr = np.array(points, dtype=np.float64)  # (J, 7)
+    # pointsとweightsをNumPy配列に変換（一度だけ、高速化のため）
+    points_arr = np.asarray(points, dtype=np.float64)  # (J, 7)
+    weights_arr = np.asarray(weights, dtype=np.float64)  # (J,)
+    
+    # 差分行列をループ外で一度だけ計算（反復中は不変）
+    # points_diff[i,j] = points[i] - points[j] (形状: (J, J, 7))
+    points_diff = points_arr[:, None, :] - points_arr[None, :, :]  # (J, J, 7)
     
     # グリッドインデックスを計算する関数
     def get_grid_indices(point_idx):
@@ -228,10 +237,10 @@ def solve_mechanism_3goods_4synergy_iterative(points, weights, grid_size, solver
         for j in range(J)
     }
     
-    # 目的関数
+    # 目的関数（配列アクセスを使用して高速化）
     objective = pulp.lpSum(
-        weights[j] * (
-            sum(p[(l, j)] * points[j][l] for l in range(7))
+        weights_arr[j] * (
+            sum(p[(l, j)] * points_arr[j, l] for l in range(7))
             - u[j]
         )
         for j in range(J)
@@ -265,16 +274,22 @@ def solve_mechanism_3goods_4synergy_iterative(points, weights, grid_size, solver
     local_constraints = set()
     for i in range(J):
         neighbors = get_neighbors(i)
-        x_i = points_arr[i]  # NumPy配列から直接取得
         for j in neighbors:
-            x_j = points_arr[j]  # NumPy配列から直接取得
+            # 差分行列から直接参照（points_diff[i, j, :]）
             prob += u[i] >= u[j] + sum(
-                p[(l, j)] * (x_i[l] - x_j[l]) for l in range(7)
+                p[(l, j)] * points_diff[i, j, l] for l in range(7)
             ), f"convex_local_{i}_{j}"
             local_constraints.add((i, j))
     
     # 追加された制約を記録（重複追加を防ぐ）
     added_constraints = local_constraints.copy()
+    
+    # 制約マスクをループ外で初期化（違反分だけ更新する方式）
+    constraint_mask = np.zeros((J, J), dtype=bool)
+    if added_constraints:
+        constraint_pairs = np.array(list(added_constraints), dtype=np.int32)
+        if len(constraint_pairs) > 0:
+            constraint_mask[constraint_pairs[:, 0], constraint_pairs[:, 1]] = True
     
     # ========== 反復ループ ==========
     for iteration in range(max_iter):
@@ -286,41 +301,30 @@ def solve_mechanism_3goods_4synergy_iterative(points, weights, grid_size, solver
             return status, None, None, None, iteration
         
         # 解を取得（NumPy配列に直接変換、高速化）
-        u_sol = np.array([u[j].varValue for j in range(J)], dtype=np.float64)
-        p_sol = np.array([[p[(l, j)].varValue for j in range(J)] for l in range(7)], dtype=np.float64)  # (7, J)
-        # points_arrは既に定義済み（最初に一度だけ変換）
+        # np.fromiterを使用してPythonループを削減
+        u_sol = np.fromiter((u[j].varValue for j in range(J)), dtype=np.float64, count=J)
+        p_sol = np.array([
+            np.fromiter((p[(l, j)].varValue for j in range(J)), dtype=np.float64, count=J)
+            for l in range(7)
+        ], dtype=np.float64)  # (7, J)
         
         # 違反している制約を検出（ベクトル化で高速化）
-        violations = []
-        
-        # 既に追加済みの制約をマスクとして作成
-        # ベクトル演算のためにNumPy配列として作成（高速化）
-        constraint_mask = np.zeros((J, J), dtype=bool)
-        if added_constraints:  # 空でない場合のみ処理
-            # リストに変換してからNumPy配列でインデックス設定（高速化）
-            constraint_pairs = np.array(list(added_constraints), dtype=np.int32)
-            if len(constraint_pairs) > 0:
-                constraint_mask[constraint_pairs[:, 0], constraint_pairs[:, 1]] = True
-        
         # 全ての(i,j)の組み合わせに対してベクトル演算
         # u_diff[i,j] = u_sol[i] - u_sol[j]
         u_diff = u_sol[:, np.newaxis] - u_sol[np.newaxis, :]  # (J, J)
         
-        # points_diff[i,j] = points[i] - points[j] (形状: (J, J, 7))
-        points_diff = points_arr[:, np.newaxis, :] - points_arr[np.newaxis, :, :]  # (J, J, 7)
+        # points_diffは既にループ外で計算済み（再計算不要）
         
-        # inner_product[i,j] = Σ_{l=0}^{6} p_sol[l,j] * (x_i[l] - x_j[l])
-        # p_solの形状は(7, J)、points_diffの形状は(J, J, 7)
-        inner_product = np.zeros((J, J), dtype=np.float64)
-        for l in range(7):
-            inner_product += p_sol[l, :][np.newaxis, :] * points_diff[:, :, l]  # (J, J)
+        # inner_productをeinsumで計算（高速化）
+        # inner_product[i,j] = Σ_l p_sol[l,j] * points_diff[i,j,l]
+        inner_product = np.einsum('lj,ijl->ij', p_sol, points_diff)  # 結果の形状: (J, J)
         
         # 違反チェック: u_i - u_j < p_j・(x_i - x_j) - tol
         violation_mask = (u_diff < inner_product - tol) & (~constraint_mask)
         
-        # 違反している(i,j)のペアを取得
-        violation_indices = np.where(violation_mask)
-        violations = list(zip(violation_indices[0], violation_indices[1]))
+        # 違反している(i,j)のペアを取得（np.argwhereで直接取得）
+        violation_pairs = np.argwhere(violation_mask)  # (N_violations, 2)
+        violations = [(int(i), int(j)) for i, j in violation_pairs]
         
         # 違反がなければ終了
         if not violations:
@@ -329,23 +333,28 @@ def solve_mechanism_3goods_4synergy_iterative(points, weights, grid_size, solver
             return status, obj_val, u_sol, p_sol, iteration + 1
         
         # 違反している制約を追加（バッチ処理で高速化）
-        # NumPy配列から直接取得して高速化
+        # 差分行列から直接参照して高速化
         for i, j in violations:
-            x_i = points_arr[i]  # NumPy配列から直接取得
-            x_j = points_arr[j]  # NumPy配列から直接取得
+            # 差分行列から直接参照（points_diff[i, j, :]）
             constraint = u[i] >= u[j] + sum(
-                p[(l, j)] * (x_i[l] - x_j[l]) for l in range(7)
+                p[(l, j)] * points_diff[i, j, l] for l in range(7)
             )
             prob += constraint, f"convex_{i}_{j}_iter{iteration}"
             added_constraints.add((i, j))
+            # 制約マスクを更新（違反分だけTrueに設定）
+            constraint_mask[i, j] = True
         
         print(f"Iteration {iteration + 1}: {len(violations)} violations found, added {len(violations)} constraints")
     
     # 最大反復回数に達した場合
     status = pulp.LpStatus[prob.status]
     obj_val = pulp.value(prob.objective)
-    u_sol = np.array([u[j].varValue for j in range(J)], dtype=np.float64)
-    p_sol = np.array([[p[(l, j)].varValue for j in range(J)] for l in range(7)], dtype=np.float64)
+    # np.fromiterを使用してPythonループを削減
+    u_sol = np.fromiter((u[j].varValue for j in range(J)), dtype=np.float64, count=J)
+    p_sol = np.array([
+        np.fromiter((p[(l, j)].varValue for j in range(J)), dtype=np.float64, count=J)
+        for l in range(7)
+    ], dtype=np.float64)
     return status, obj_val, u_sol, p_sol, max_iter
 
 

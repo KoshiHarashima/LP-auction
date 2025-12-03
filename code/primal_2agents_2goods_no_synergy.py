@@ -2,7 +2,7 @@
 Primal問題: Rochet-Choné型LP
 複数エージェント2財の最適オークション機構設計（シナジーなし、Implementability制約なし）
 
-primal_2agents.pyを改良:
+primal_2agents_2goods_with_synergy.pyを改良:
 - シナジーを削除（2財のみ）
 - Implementability制約を削除
 - 複数エージェントに対応可能な設計
@@ -62,14 +62,19 @@ def solve_mechanism_multi_agent(points_list, weights_list, solver=None):
         - p_list: list of np.ndarray, p_list[i][l][j_1,...,j_n] = 参加者iへの財lの配分確率 (l=0,1)
     """
     n_agents = len(points_list)
-    assert n_agents == len(weights_list), "points_listとweights_listの長さが一致しません"
-    assert n_agents >= 1, "参加者は1人以上である必要があります"
-    
     # 各参加者の型数を取得
     J_list = [len(points) for points in points_list]
-    for i, points in enumerate(points_list):
-        assert len(points) == len(weights_list[i]), f"参加者{i+1}のpointsとweightsの長さが一致しません"
-        assert len(points[0]) == 2, f"参加者{i+1}のpointsは2次元である必要があります (財a, 財b)"
+    
+    # pointsとweightsをNumPy配列に変換（一度だけ、高速化のため）
+    points_arr_list = [np.asarray(points, dtype=np.float64) for points in points_list]
+    weights_arr_list = [np.asarray(weights, dtype=np.float64) for weights in weights_list]
+    
+    # 各エージェントの差分行列を一括計算（ループ外で一度だけ）
+    # points_diff_list[i][j_i, k_i] = points[i][j_i] - points[i][k_i] (形状: (J_i, J_i, 2))
+    points_diff_list = [
+        points_arr[:, None, :] - points_arr[None, :, :] 
+        for points_arr in points_arr_list
+    ]
     
     # 問題設定
     prob = pulp.LpProblem("RC_multi_agent_2goods", pulp.LpMaximize)
@@ -112,14 +117,14 @@ def solve_mechanism_multi_agent(points_list, weights_list, solver=None):
         # 重みの積を計算
         weight_product = 1.0
         for i in range(n_agents):
-            weight_product *= weights_list[i][indices[i]]
+            weight_product *= weights_arr_list[i][indices[i]]
         
         # 各参加者の項を追加
         for i in range(n_agents):
             j_i = indices[i]
             term = (
-                p_list[i][(0, indices)] * points_list[i][j_i][0]  # 財aの価値
-                + p_list[i][(1, indices)] * points_list[i][j_i][1]  # 財bの価値
+                p_list[i][(0, indices)] * points_arr_list[i][j_i, 0]  # 財aの価値
+                + p_list[i][(1, indices)] * points_arr_list[i][j_i, 1]  # 財bの価値
                 - u_list[i][indices]
             )
             objective_terms.append(weight_product * term)
@@ -139,10 +144,8 @@ def solve_mechanism_multi_agent(points_list, weights_list, solver=None):
     for i in range(n_agents):
         # 参加者iの型の組み合わせ
         for i_i in range(J_list[i]):
-            x_i_i = points_list[i][i_i]
             for k_i in range(J_list[i]):
-                x_i_k = points_list[i][k_i]
-                
+                # 差分行列から直接参照（points_diff_list[i][i_i, k_i, :]）
                 # 他の参加者の型の組み合わせ
                 other_indices = [range(J_list[j]) for j in range(n_agents) if j != i]
                 for other_comb in product(*other_indices):
@@ -153,9 +156,10 @@ def solve_mechanism_multi_agent(points_list, weights_list, solver=None):
                     indices_k = tuple(indices_k)
                     
                     # IC制約: u_i(i_i, j_{-i}) >= u_i(k_i, j_{-i}) + p_i(k_i, j_{-i})・(x_i(i_i) - x_i(k_i))
+                    # 差分行列から直接参照（points_diff_list[i][i_i, k_i, :]）
                     prob += u_list[i][indices_i] >= u_list[i][indices_k] + (
-                        p_list[i][(0, indices_k)] * (x_i_i[0] - x_i_k[0])  # 財aの項
-                        + p_list[i][(1, indices_k)] * (x_i_i[1] - x_i_k[1])  # 財bの項
+                        p_list[i][(0, indices_k)] * points_diff_list[i][i_i, k_i, 0]  # 財aの項
+                        + p_list[i][(1, indices_k)] * points_diff_list[i][i_i, k_i, 1]  # 財bの項
                     ), f"ic{i}_{i_i}_{k_i}_{'_'.join(map(str, other_comb))}"
 
     # ========== 解く ==========
@@ -242,21 +246,8 @@ def solve_mechanism_multi_agent_iterative(points_list, weights_list, grid_sizes_
         (status_string, objective_value, u_list, p_list, n_iterations)
     """
     n_agents = len(points_list)
-    assert n_agents == len(weights_list), "points_listとweights_listの長さが一致しません"
-    assert n_agents == len(grid_sizes_list), "points_listとgrid_sizes_listの長さが一致しません"
-    assert n_agents >= 1, "参加者は1人以上である必要があります"
-    
     # 各参加者の型数を取得
     J_list = [len(points) for points in points_list]
-    for i, points in enumerate(points_list):
-        assert len(points) == len(weights_list[i]), f"参加者{i+1}のpointsとweightsの長さが一致しません"
-        assert len(points[0]) == 2, f"参加者{i+1}のpointsは2次元である必要があります"
-        assert len(grid_sizes_list[i]) == 2, f"参加者{i+1}のgrid_sizesは2次元である必要があります"
-    
-    # グリッドサイズの検証
-    for i in range(n_agents):
-        nx_i, ny_i = grid_sizes_list[i]
-        assert nx_i * ny_i == J_list[i], f"参加者{i+1}のgrid_sizesの積({nx_i * ny_i})がpointsの数({J_list[i]})と一致しません"
     
     # pointsをNumPy配列に変換（一度だけ、高速化のため）
     points_arr_list = [np.array(points, dtype=np.float64) for points in points_list]  # 各要素は (J_i, 2)

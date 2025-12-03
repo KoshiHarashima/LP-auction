@@ -6,12 +6,35 @@
 """
 
 from math import gamma
+import numpy as np
+try:
+    from scipy.special import gamma as gamma_func, beta as beta_func
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
 
 
 def beta_pdf(x, a, b):
-    """Beta(a,b) の密度 f(x) を計算（0<x<1）。"""
-    B = gamma(a) * gamma(b) / gamma(a + b)
-    return (x ** (a - 1)) * ((1 - x) ** (b - 1)) / B
+    """
+    Beta(a,b) の密度 f(x) を計算（0<x<1）。
+    スカラーまたはNumPy配列に対応。
+    """
+    is_scalar = not isinstance(x, np.ndarray)
+    if is_scalar:
+        x = np.array([x])
+    
+    if HAS_SCIPY:
+        # scipy.specialを使った高速なベクトル化実装
+        B = beta_func(a, b)
+        result = (x ** (a - 1)) * ((1 - x) ** (b - 1)) / B
+    else:
+        # math.gammaを使った実装（スカラーのみ）
+        B = gamma(a) * gamma(b) / gamma(a + b)
+        result = (x ** (a - 1)) * ((1 - x) ** (b - 1)) / B
+    
+    if is_scalar:
+        return float(result[0])
+    return result
 
 
 def _normalize_dist_param(param, dim_index=0):
@@ -44,54 +67,84 @@ def _normalize_dist_param(param, dim_index=0):
         raise ValueError(f"Invalid parameter format at dimension {dim_index}: {param}")
 
 
-def _generate_coords(n, dist_type, params, range_min, range_max):
+def _generate_coords(n, dist_type, params, range_min, range_max, return_array=False):
     """
     指定された分布に基づいて座標を生成する。
     
+    パラメータ:
+        return_array: Trueの場合、NumPy配列を返す（ベクトル化用）
+    
     戻り値:
-        coords: list of float, グリッド座標
+        coords: list of float または np.ndarray, グリッド座標
         cell_size: float, セルサイズ
     """
     cell_size = (range_max - range_min) / n
-    coords = []
+    range_diff = range_max - range_min
     
     if dist_type == 'beta':
         # ベータ分布: [0,1]で生成してから範囲にマッピング
-        a, b = params
-        for i in range(n):
-            # [0,1]での中央点
-            u = (i + 0.5) / n
-            # 範囲にマッピング
-            x = range_min + u * (range_max - range_min)
-            coords.append(x)
+        # (i + 0.5) / n の形式で生成
+        u = (np.arange(n) + 0.5) / n
+        coords = range_min + u * range_diff
     elif dist_type == 'uniform':
         # 一様分布: 範囲内で等間隔
-        for i in range(n):
-            x = range_min + (i + 0.5) * cell_size
-            coords.append(x)
+        coords = range_min + (np.arange(n) + 0.5) * cell_size
+    else:
+        coords = np.array([])
+    
+    if not return_array:
+        coords = coords.tolist()
     
     return coords, cell_size
 
 
 def _compute_weight(coord, dist_type, params, range_min, range_max):
     """
-    指定された座標での密度を計算する。
+    指定された座標での密度を計算する（スカラーまたは配列対応）。
+    
+    パラメータ:
+        coord: float または np.ndarray, 座標値
+        dist_type: str, 分布タイプ
+        params: tuple, 分布パラメータ
+        range_min: float, 範囲の最小値
+        range_max: float, 範囲の最大値
+    
+    戻り値:
+        density: float または np.ndarray, 密度値
     """
+    is_scalar = not isinstance(coord, np.ndarray)
+    if is_scalar:
+        coord = np.array([coord])
+    
+    range_diff = range_max - range_min
+    if range_diff == 0:
+        range_diff = 1.0
+    
     if dist_type == 'beta':
         a, b = params
         # [0,1]に正規化
-        u = (coord - range_min) / (range_max - range_min) if range_max != range_min else 0.5
-        if u < 0 or u > 1:
-            return 0.0
-        # ベータ分布の密度を計算（範囲のスケーリングを考慮）
-        density = beta_pdf(u, a, b) / (range_max - range_min) if range_max != range_min else beta_pdf(u, a, b)
-        return density
+        u = (coord - range_min) / range_diff
+        # 範囲外を0に
+        mask = (u >= 0) & (u <= 1)
+        density = np.zeros_like(coord)
+        if np.any(mask):
+            # ベクトル化されたbeta_pdf計算
+            u_valid = u[mask]
+            # Beta分布の密度を計算（範囲のスケーリングを考慮）
+            B = gamma(a) * gamma(b) / gamma(a + b)
+            density_valid = ((u_valid ** (a - 1)) * ((1 - u_valid) ** (b - 1))) / B / range_diff
+            density[mask] = density_valid
     elif dist_type == 'uniform':
         # 一様分布の密度
-        if coord < range_min or coord > range_max:
-            return 0.0
-        return 1.0 / (range_max - range_min) if range_max != range_min else 1.0
-    return 0.0
+        mask = (coord >= range_min) & (coord <= range_max)
+        density = np.zeros_like(coord)
+        density[mask] = 1.0 / range_diff
+    else:
+        density = np.zeros_like(coord)
+    
+    if is_scalar:
+        return float(density[0])
+    return density
 
 
 def make_tensor_grid_2d(nx, ny, beta_params=None):
@@ -113,15 +166,18 @@ def make_tensor_grid_2d(nx, ny, beta_params=None):
         weights: list of w_j (beta_params指定時) または cell_volume (指定なし)
     """
     if beta_params is None:
-        # 重みなし：従来通り[0,1]で生成
-        xs = [(i + 0.5) / nx for i in range(nx)]
-        ys = [(j + 0.5) / ny for j in range(ny)]
+        # 重みなし：ベクトル化された座標生成
+        xs = (np.arange(nx) + 0.5) / nx
+        ys = (np.arange(ny) + 0.5) / ny
         dx, dy = 1.0 / nx, 1.0 / ny
         cell_vol = dx * dy
-        points = []
-        for x1 in xs:
-            for x2 in ys:
-                points.append((x1, x2))
+        
+        # np.meshgridで直積を生成し、reshapeで平坦化
+        grid = np.stack(np.meshgrid(xs, ys, indexing='ij'), axis=-1)
+        points = grid.reshape(-1, 2).tolist()
+        # タプルのリストに変換（後方互換性のため）
+        points = [tuple(p) for p in points]
+        
         return points, cell_vol
     else:
         # 重みあり：分布パラメータを正規化
@@ -129,29 +185,37 @@ def make_tensor_grid_2d(nx, ny, beta_params=None):
         
         dist_configs = [_normalize_dist_param(p, i) for i, p in enumerate(beta_params)]
         
-        # 各次元の座標を生成
-        xs, dx = _generate_coords(nx, *dist_configs[0])
-        ys, dy = _generate_coords(ny, *dist_configs[1])
+        # 各次元の座標を生成（NumPy配列として）
+        xs_arr, dx = _generate_coords(nx, *dist_configs[0], return_array=True)
+        ys_arr, dy = _generate_coords(ny, *dist_configs[1], return_array=True)
         
         cell_vol = dx * dy
-        points = []
-        weights = []
         
-        for x1 in xs:
-            f1 = _compute_weight(x1, *dist_configs[0])
-            for x2 in ys:
-                f2 = _compute_weight(x2, *dist_configs[1])
-                points.append((x1, x2))
-                w = f1 * f2 * cell_vol
-                weights.append(w)
+        # np.meshgridで直積を生成
+        grid = np.stack(np.meshgrid(xs_arr, ys_arr, indexing='ij'), axis=-1)
+        points_arr = grid.reshape(-1, 2)
         
-        # 数値誤差を補正して重みが1になるよう正規化
-        total_w = sum(weights)
+        # ベクトル化された重み計算
+        # 各軸の密度を事前計算
+        f1_arr = _compute_weight(xs_arr, *dist_configs[0])
+        f2_arr = _compute_weight(ys_arr, *dist_configs[1])
+        
+        # 外積で全組み合わせの重みを計算
+        # f1_arr (nx,) × f2_arr (ny,) -> (nx, ny)
+        weights_2d = np.outer(f1_arr, f2_arr)
+        weights = (weights_2d * cell_vol).flatten()
+        
+        # NumPyリダクションで正規化
+        total_w = weights.sum()
         if total_w > 0:
-            weights = [w / total_w for w in weights]
+            weights = weights / total_w
         else:
             # 一様分布の場合は等重み
-            weights = [1.0 / len(points)] * len(points)
+            weights = np.full(len(points_arr), 1.0 / len(points_arr))
+        
+        # 後方互換性のためリストに変換（タプルの要素もfloatに変換）
+        points = [tuple(float(x) for x in p) for p in points_arr]
+        weights = weights.tolist()
         
         return points, weights
 
@@ -176,17 +240,19 @@ def make_tensor_grid_3d(nx, ny, nz, beta_params=None):
         weights: list of w_j (beta_params指定時) または cell_volume (指定なし)
     """
     if beta_params is None:
-        # 重みなし：従来通り[0,1]で生成
-        xs = [(i + 0.5) / nx for i in range(nx)]
-        ys = [(j + 0.5) / ny for j in range(ny)]
-        zs = [(k + 0.5) / nz for k in range(nz)]
+        # 重みなし：ベクトル化された座標生成
+        xs = (np.arange(nx) + 0.5) / nx
+        ys = (np.arange(ny) + 0.5) / ny
+        zs = (np.arange(nz) + 0.5) / nz
         dx, dy, dz = 1.0 / nx, 1.0 / ny, 1.0 / nz
         cell_vol = dx * dy * dz
-        points = []
-        for x1 in xs:
-            for x2 in ys:
-                for x3 in zs:
-                    points.append((x1, x2, x3))
+        
+        # np.meshgridで直積を生成し、reshapeで平坦化
+        grid = np.stack(np.meshgrid(xs, ys, zs, indexing='ij'), axis=-1)
+        points = grid.reshape(-1, 3).tolist()
+        # タプルのリストに変換（後方互換性のため）
+        points = [tuple(p) for p in points]
+        
         return points, cell_vol
     else:
         # 重みあり：分布パラメータを正規化
@@ -194,32 +260,39 @@ def make_tensor_grid_3d(nx, ny, nz, beta_params=None):
         
         dist_configs = [_normalize_dist_param(p, i) for i, p in enumerate(beta_params)]
         
-        # 各次元の座標を生成
-        xs, dx = _generate_coords(nx, *dist_configs[0])
-        ys, dy = _generate_coords(ny, *dist_configs[1])
-        zs, dz = _generate_coords(nz, *dist_configs[2])
+        # 各次元の座標を生成（NumPy配列として）
+        xs_arr, dx = _generate_coords(nx, *dist_configs[0], return_array=True)
+        ys_arr, dy = _generate_coords(ny, *dist_configs[1], return_array=True)
+        zs_arr, dz = _generate_coords(nz, *dist_configs[2], return_array=True)
         
         cell_vol = dx * dy * dz
-        points = []
-        weights = []
         
-        for x1 in xs:
-            f1 = _compute_weight(x1, *dist_configs[0])
-            for x2 in ys:
-                f2 = _compute_weight(x2, *dist_configs[1])
-                for x3 in zs:
-                    f3 = _compute_weight(x3, *dist_configs[2])
-                    points.append((x1, x2, x3))
-                    w = f1 * f2 * f3 * cell_vol
-                    weights.append(w)
+        # np.meshgridで直積を生成
+        grid = np.stack(np.meshgrid(xs_arr, ys_arr, zs_arr, indexing='ij'), axis=-1)
+        points_arr = grid.reshape(-1, 3)
         
-        # 数値誤差を補正して重みが1になるよう正規化
-        total_w = sum(weights)
+        # ベクトル化された重み計算
+        # 各軸の密度を事前計算
+        f1_arr = _compute_weight(xs_arr, *dist_configs[0])
+        f2_arr = _compute_weight(ys_arr, *dist_configs[1])
+        f3_arr = _compute_weight(zs_arr, *dist_configs[2])
+        
+        # 外積で全組み合わせの重みを計算
+        # f1_arr (nx,) × f2_arr (ny,) × f3_arr (nz,) -> (nx, ny, nz)
+        weights_3d = np.multiply.outer(np.multiply.outer(f1_arr, f2_arr), f3_arr)
+        weights = (weights_3d * cell_vol).flatten()
+        
+        # NumPyリダクションで正規化
+        total_w = weights.sum()
         if total_w > 0:
-            weights = [w / total_w for w in weights]
+            weights = weights / total_w
         else:
             # 一様分布の場合は等重み
-            weights = [1.0 / len(points)] * len(points)
+            weights = np.full(len(points_arr), 1.0 / len(points_arr))
+        
+        # 後方互換性のためリストに変換（タプルの要素もfloatに変換）
+        points = [tuple(float(x) for x in p) for p in points_arr]
+        weights = weights.tolist()
         
         return points, weights
 
@@ -244,13 +317,17 @@ def make_tensor_grid_7d(n, beta_params=None):
         weights: list of w_j (beta_params指定時) または cell_volume (指定なし)
     """
     if beta_params is None:
-        # 重みなし：従来通り[0,1]で生成
-        coords = [[(i + 0.5) / n for i in range(n)] for _ in range(7)]
+        # 重みなし：ベクトル化された座標生成
+        coords_1d = (np.arange(n) + 0.5) / n
         cell_vol = (1.0 / n) ** 7
-        points = []
-        from itertools import product
-        for point in product(*coords):
-            points.append(point)
+        
+        # np.meshgridで7次元の直積を生成
+        grid = np.stack(np.meshgrid(*([coords_1d] * 7), indexing='ij'), axis=-1)
+        points_arr = grid.reshape(-1, 7)
+        
+        # 後方互換性のためタプルのリストに変換（タプルの要素もfloatに変換）
+        points = [tuple(float(x) for x in p) for p in points_arr]
+        
         return points, cell_vol
     else:
         # 重みあり：分布パラメータを正規化
@@ -258,36 +335,44 @@ def make_tensor_grid_7d(n, beta_params=None):
         
         dist_configs = [_normalize_dist_param(p, i) for i, p in enumerate(beta_params)]
         
-        # 各次元の座標を生成
-        coords_list = []
+        # 各次元の座標を生成（NumPy配列として）
+        coords_arr_list = []
         cell_sizes = []
         for dist_config in dist_configs:
-            coords, cell_size = _generate_coords(n, *dist_config)
-            coords_list.append(coords)
+            coords_arr, cell_size = _generate_coords(n, *dist_config, return_array=True)
+            coords_arr_list.append(coords_arr)
             cell_sizes.append(cell_size)
         
-        cell_vol = 1.0
-        for cs in cell_sizes:
-            cell_vol *= cs
+        cell_vol = np.prod(cell_sizes)
         
-        points = []
-        weights = []
-        from itertools import product
+        # np.meshgridで7次元の直積を生成
+        grid = np.stack(np.meshgrid(*coords_arr_list, indexing='ij'), axis=-1)
+        points_arr = grid.reshape(-1, 7)
         
-        for point in product(*coords_list):
-            points.append(point)
-            w = cell_vol
-            for coord, dist_config in zip(point, dist_configs):
-                w *= _compute_weight(coord, *dist_config)
-            weights.append(w)
+        # ベクトル化された重み計算
+        # 各軸の密度を事前計算
+        density_arrs = [_compute_weight(coords_arr, *dist_config) 
+                       for coords_arr, dist_config in zip(coords_arr_list, dist_configs)]
         
-        # 数値誤差を補正して重みが1になるよう正規化
-        total_w = sum(weights)
+        # 外積で全組み合わせの重みを計算
+        # 7次元の外積を段階的に計算
+        weights_nd = density_arrs[0]
+        for density_arr in density_arrs[1:]:
+            weights_nd = np.multiply.outer(weights_nd, density_arr)
+        
+        weights = (weights_nd * cell_vol).flatten()
+        
+        # NumPyリダクションで正規化
+        total_w = weights.sum()
         if total_w > 0:
-            weights = [w / total_w for w in weights]
+            weights = weights / total_w
         else:
             # 一様分布の場合は等重み
-            weights = [1.0 / len(points)] * len(points)
+            weights = np.full(len(points_arr), 1.0 / len(points_arr))
+        
+        # 後方互換性のためリストに変換（タプルの要素もfloatに変換）
+        points = [tuple(float(x) for x in p) for p in points_arr]
+        weights = weights.tolist()
         
         return points, weights
 

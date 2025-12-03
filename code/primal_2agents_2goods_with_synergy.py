@@ -75,10 +75,18 @@ def solve_mechanism_2agents(points1, weights1, points2, weights2, solver=None):
     """
     J1 = len(points1)
     J2 = len(points2)
-    assert J1 == len(weights1)
-    assert J2 == len(weights2)
-    assert len(points1[0]) == 3, "points1は3次元である必要があります (財a, 財b, シナジーα)"
-    assert len(points2[0]) == 3, "points2は3次元である必要があります (財a, 財b, シナジーα)"
+
+    # pointsとweightsをNumPy配列に変換（一度だけ、高速化のため）
+    points1_arr = np.asarray(points1, dtype=np.float64)  # (J1, 3)
+    points2_arr = np.asarray(points2, dtype=np.float64)  # (J2, 3)
+    weights1_arr = np.asarray(weights1, dtype=np.float64)  # (J1,)
+    weights2_arr = np.asarray(weights2, dtype=np.float64)  # (J2,)
+
+    # 差分行列を一括計算（ループ外で一度だけ）
+    # points1_diff[i1,k1] = points1[i1] - points1[k1] (形状: (J1, J1, 3))
+    points1_diff = points1_arr[:, None, :] - points1_arr[None, :, :]  # (J1, J1, 3)
+    # points2_diff[i2,k2] = points2[i2] - points2[k2] (形状: (J2, J2, 3))
+    points2_diff = points2_arr[:, None, :] - points2_arr[None, :, :]  # (J2, J2, 3)
 
     # 問題設定
     prob = pulp.LpProblem("RC_2agents_2goods_1synergy", pulp.LpMaximize)
@@ -118,17 +126,18 @@ def solve_mechanism_2agents(points1, weights1, points2, weights2, solver=None):
 
     # ========== 目的関数 ==========
     # Cursor.md: max Σ_{j1, j2} w1[j1] w2[j2] ((p1(j1,j2)・x1(j1) - u1(j1,j2)) + (p2(j1,j2)・x2(j2) - u2(j1,j2)))
+    # 配列アクセスを使用して高速化
     objective = pulp.lpSum(
-        weights1[j1] * weights2[j2] * (
+        weights1_arr[j1] * weights2_arr[j2] * (
             # 参加者1の項
-            p1[(0, j1, j2)] * points1[j1][0]  # 財aの価値
-            + p1[(1, j1, j2)] * points1[j1][1]  # 財bの価値
-            + p1[(2, j1, j2)] * points1[j1][2]  # シナジーαの価値
+            p1[(0, j1, j2)] * points1_arr[j1, 0]  # 財aの価値
+            + p1[(1, j1, j2)] * points1_arr[j1, 1]  # 財bの価値
+            + p1[(2, j1, j2)] * points1_arr[j1, 2]  # シナジーαの価値
             - u1[(j1, j2)]
             # 参加者2の項
-            + p2[(0, j1, j2)] * points2[j2][0]  # 財aの価値
-            + p2[(1, j1, j2)] * points2[j2][1]  # 財bの価値
-            + p2[(2, j1, j2)] * points2[j2][2]  # シナジーαの価値
+            + p2[(0, j1, j2)] * points2_arr[j2, 0]  # 財aの価値
+            + p2[(1, j1, j2)] * points2_arr[j2, 1]  # 財bの価値
+            + p2[(2, j1, j2)] * points2_arr[j2, 2]  # シナジーαの価値
             - u2[(j1, j2)]
         )
         for j1 in range(J1)
@@ -146,28 +155,28 @@ def solve_mechanism_2agents(points1, weights1, points2, weights2, solver=None):
     
     # 3. IC制約（参加者1）: u1(i1, j2) >= u1(k1, j2) + p1(k1, j2)・(x1(i1) - x1(k1)) for all i1, k1, j2
     # Cursor.md: u_1(i) \ge u_1(j) + \mathbf{p}_1(j)^{\top}(\mathbf{x}_1(i) - \mathbf{x}_1(j)) \quad \forall i, j
+    # 差分行列をキャッシュから参照して高速化
     for i1 in range(J1):
-        x1_i = points1[i1]
         for k1 in range(J1):
-            x1_k = points1[k1]
             for j2 in range(J2):
+                # 差分行列から直接参照（points1_diff[i1, k1, :]）
                 prob += u1[(i1, j2)] >= u1[(k1, j2)] + (
-                    p1[(0, k1, j2)] * (x1_i[0] - x1_k[0])  # 財aの項
-                    + p1[(1, k1, j2)] * (x1_i[1] - x1_k[1])  # 財bの項
-                    + p1[(2, k1, j2)] * (x1_i[2] - x1_k[2])  # シナジーαの項
+                    p1[(0, k1, j2)] * points1_diff[i1, k1, 0]  # 財aの項
+                    + p1[(1, k1, j2)] * points1_diff[i1, k1, 1]  # 財bの項
+                    + p1[(2, k1, j2)] * points1_diff[i1, k1, 2]  # シナジーαの項
                 ), f"ic1_{i1}_{k1}_{j2}"
     
     # 4. IC制約（参加者2）: u2(j1, i2) >= u2(j1, k2) + p2(j1, k2)・(x2(i2) - x2(k2)) for all i2, k2, j1
     # Cursor.md: u_2(i) \ge u_2(j) + \mathbf{p}_2(j)^{\top}(\mathbf{x}_2(i) - \mathbf{x}_2(j)) \quad \forall i, j
+    # 差分行列をキャッシュから参照して高速化
     for i2 in range(J2):
-        x2_i = points2[i2]
         for k2 in range(J2):
-            x2_k = points2[k2]
             for j1 in range(J1):
+                # 差分行列から直接参照（points2_diff[i2, k2, :]）
                 prob += u2[(j1, i2)] >= u2[(j1, k2)] + (
-                    p2[(0, j1, k2)] * (x2_i[0] - x2_k[0])  # 財aの項
-                    + p2[(1, j1, k2)] * (x2_i[1] - x2_k[1])  # 財bの項
-                    + p2[(2, j1, k2)] * (x2_i[2] - x2_k[2])  # シナジーαの項
+                    p2[(0, j1, k2)] * points2_diff[i2, k2, 0]  # 財aの項
+                    + p2[(1, j1, k2)] * points2_diff[i2, k2, 1]  # 財bの項
+                    + p2[(2, j1, k2)] * points2_diff[i2, k2, 2]  # シナジーαの項
                 ), f"ic2_{j1}_{i2}_{k2}"
     
     # 5. シナジーの配分制約（参加者1）
@@ -314,17 +323,8 @@ def solve_mechanism_2agents_iterative(points1, weights1, grid_sizes1, points2, w
     """
     J1 = len(points1)
     J2 = len(points2)
-    assert J1 == len(weights1)
-    assert J2 == len(weights2)
-    assert len(points1[0]) == 3, "points1は3次元である必要があります"
-    assert len(points2[0]) == 3, "points2は3次元である必要があります"
-    assert len(grid_sizes1) == 3, "grid_sizes1は3次元である必要があります"
-    assert len(grid_sizes2) == 3, "grid_sizes2は3次元である必要があります"
-    
     nx1, ny1, nz1 = grid_sizes1
     nx2, ny2, nz2 = grid_sizes2
-    assert nx1 * ny1 * nz1 == J1, f"grid_sizes1の積({nx1 * ny1 * nz1})がpoints1の数({J1})と一致しません"
-    assert nx2 * ny2 * nz2 == J2, f"grid_sizes2の積({nx2 * ny2 * nz2})がpoints2の数({J2})と一致しません"
     
     # pointsをNumPy配列に変換（一度だけ、高速化のため）
     points1_arr = np.array(points1, dtype=np.float64)  # (J1, 3)

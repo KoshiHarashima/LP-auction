@@ -54,8 +54,14 @@ def solve_mechanism(points, weights, solver=None):
         - p: list of lists, p[l][j] = 財lを型jに割り当てる確率 (l=0,1,2)
     """
     J = len(points)
-    assert J == len(weights)
-    assert len(points[0]) == 3, "pointsは3次元である必要があります (財a, 財b, シナジーα)"
+
+    # pointsとweightsをNumPy配列に変換（一度だけ、高速化のため）
+    points_arr = np.asarray(points, dtype=np.float64)  # (J, 3)
+    weights_arr = np.asarray(weights, dtype=np.float64)  # (J,)
+
+    # 差分行列を一括計算（ループ外で一度だけ）
+    # points_diff[i,j] = points[i] - points[j] (形状: (J, J, 3))
+    points_diff = points_arr[:, None, :] - points_arr[None, :, :]  # (J, J, 3)
 
     # 問題設定
     prob = pulp.LpProblem("RC_2goods_1synergy", pulp.LpMaximize)
@@ -80,11 +86,12 @@ def solve_mechanism(points, weights, solver=None):
     # ========== 目的関数 ==========
     # Cursor.md: max Σ_{1,2,3} Σ_{j} w ((p(j)・x(j)) - u(j))
     # p(j)・x(j) は3次元ベクトルの内積
+    # 配列アクセスを使用して高速化
     objective = pulp.lpSum(
-        weights[j] * (
-            p[(0, j)] * points[j][0]  # 財aの価値
-            + p[(1, j)] * points[j][1]  # 財bの価値
-            + p[(2, j)] * points[j][2]  # シナジーαの価値
+        weights_arr[j] * (
+            p[(0, j)] * points_arr[j, 0]  # 財aの価値
+            + p[(1, j)] * points_arr[j, 1]  # 財bの価値
+            + p[(2, j)] * points_arr[j, 2]  # シナジーαの価値
             - u[j]
         )
         for j in range(J)
@@ -101,14 +108,14 @@ def solve_mechanism(points, weights, solver=None):
     
     # 3. 凸性制約: u_i ≥ u_j + p_j (x_i - x_j) for all i,j
     # Cursor.md: 全てのタイプの組み(i, j)に関して
+    # 差分行列をキャッシュから参照して高速化
     for i in range(J):
-        x_i = points[i]
         for j in range(J):
-            x_j = points[j]
+            # 差分行列から直接参照（points_diff[i, j, :]）
             prob += u[i] >= u[j] + (
-                p[(0, j)] * (x_i[0] - x_j[0])  # 財aの項
-                + p[(1, j)] * (x_i[1] - x_j[1])  # 財bの項
-                + p[(2, j)] * (x_i[2] - x_j[2])  # シナジーαの項
+                p[(0, j)] * points_diff[i, j, 0]  # 財aの項
+                + p[(1, j)] * points_diff[i, j, 1]  # 財bの項
+                + p[(2, j)] * points_diff[i, j, 2]  # シナジーαの項
             ), f"convex_{i}_{j}"
     
     # 4. シナジーの配分制約
@@ -131,9 +138,12 @@ def solve_mechanism(points, weights, solver=None):
     obj_val = pulp.value(prob.objective)
 
     # ========== 結果 ==========
-    # NumPy配列に直接変換
-    u_sol = np.array([u[j].varValue for j in range(J)], dtype=np.float64)
-    p_sol = np.array([[p[(l, j)].varValue for j in range(J)] for l in range(3)], dtype=np.float64)
+    # NumPy配列に直接変換（リスト内包表記を最適化）
+    u_sol = np.fromiter((u[j].varValue for j in range(J)), dtype=np.float64, count=J)
+    p_sol = np.array([
+        np.fromiter((p[(l, j)].varValue for j in range(J)), dtype=np.float64, count=J)
+        for l in range(3)
+    ], dtype=np.float64)
 
     return status, obj_val, u_sol, p_sol
 
@@ -161,15 +171,15 @@ def solve_mechanism_iterative(points, weights, grid_sizes, solver=None, max_iter
         (status_string, objective_value, u, p, n_iterations)
     """
     J = len(points)
-    assert J == len(weights)
-    assert len(points[0]) == 3, "pointsは3次元である必要があります"
-    assert len(grid_sizes) == 3, "grid_sizesは3次元である必要があります"
-    
     nx, ny, nz = grid_sizes
-    assert nx * ny * nz == J, f"grid_sizesの積({nx * ny * nz})がpointsの数({J})と一致しません"
     
-    # pointsをNumPy配列に変換（一度だけ、高速化のため）
-    points_arr = np.array(points, dtype=np.float64)  # (J, 3)
+    # pointsとweightsをNumPy配列に変換（一度だけ、高速化のため）
+    points_arr = np.asarray(points, dtype=np.float64)  # (J, 3)
+    weights_arr = np.asarray(weights, dtype=np.float64)  # (J,)
+    
+    # 差分行列をループ外で一度だけ計算（反復中は不変）
+    # points_diff[i,j] = points[i] - points[j] (形状: (J, J, 3))
+    points_diff = points_arr[:, None, :] - points_arr[None, :, :]  # (J, J, 3)
     
     # グリッドインデックスを計算する関数
     def get_grid_indices(point_idx):
@@ -215,12 +225,12 @@ def solve_mechanism_iterative(points, weights, grid_sizes, solver=None, max_iter
         for j in range(J)
     }
     
-    # 目的関数
+    # 目的関数（配列アクセスを使用して高速化）
     objective = pulp.lpSum(
-        weights[j] * (
-            p[(0, j)] * points[j][0]
-            + p[(1, j)] * points[j][1]
-            + p[(2, j)] * points[j][2]
+        weights_arr[j] * (
+            p[(0, j)] * points_arr[j, 0]
+            + p[(1, j)] * points_arr[j, 1]
+            + p[(2, j)] * points_arr[j, 2]
             - u[j]
         )
         for j in range(J)
@@ -237,18 +247,24 @@ def solve_mechanism_iterative(points, weights, grid_sizes, solver=None, max_iter
     local_constraints = set()
     for i in range(J):
         neighbors = get_neighbors(i)
-        x_i = points_arr[i]  # NumPy配列から直接取得
         for j in neighbors:
-            x_j = points_arr[j]  # NumPy配列から直接取得
+            # 差分行列から直接参照（points_diff[i, j, :]）
             prob += u[i] >= u[j] + (
-                p[(0, j)] * (x_i[0] - x_j[0])
-                + p[(1, j)] * (x_i[1] - x_j[1])
-                + p[(2, j)] * (x_i[2] - x_j[2])
+                p[(0, j)] * points_diff[i, j, 0]
+                + p[(1, j)] * points_diff[i, j, 1]
+                + p[(2, j)] * points_diff[i, j, 2]
             ), f"convex_local_{i}_{j}"
             local_constraints.add((i, j))
     
     # 追加された制約を記録（重複追加を防ぐ）
     added_constraints = local_constraints.copy()
+    
+    # 制約マスクをループ外で初期化（違反分だけ更新する方式）
+    constraint_mask = np.zeros((J, J), dtype=bool)
+    if added_constraints:
+        constraint_pairs = np.array(list(added_constraints), dtype=np.int32)
+        if len(constraint_pairs) > 0:
+            constraint_mask[constraint_pairs[:, 0], constraint_pairs[:, 1]] = True
     
     # ========== 反復ループ ==========
     for iteration in range(max_iter):
@@ -260,42 +276,32 @@ def solve_mechanism_iterative(points, weights, grid_sizes, solver=None, max_iter
             return status, None, None, None, iteration
         
         # 解を取得（NumPy配列に直接変換、高速化）
-        u_sol = np.array([u[j].varValue for j in range(J)], dtype=np.float64)
-        p_sol = np.array([[p[(l, j)].varValue for j in range(J)] for l in range(3)], dtype=np.float64)  # (3, J)
-        # points_arrは既に定義済み（最初に一度だけ変換）
+        # np.fromiterを使用してPythonループを削減
+        u_sol = np.fromiter((u[j].varValue for j in range(J)), dtype=np.float64, count=J)
+        p_sol = np.array([
+            np.fromiter((p[(l, j)].varValue for j in range(J)), dtype=np.float64, count=J)
+            for l in range(3)
+        ], dtype=np.float64)  # (3, J)
         
         # 違反している制約を検出（ベクトル化で高速化）
-        violations = []
-        
-        # 既に追加済みの制約をマスクとして作成
-        # ベクトル演算のためにNumPy配列として作成（高速化）
-        constraint_mask = np.zeros((J, J), dtype=bool)
-        if added_constraints:  # 空でない場合のみ処理
-            # リストに変換してからNumPy配列でインデックス設定（高速化）
-            constraint_pairs = np.array(list(added_constraints), dtype=np.int32)
-            if len(constraint_pairs) > 0:
-                constraint_mask[constraint_pairs[:, 0], constraint_pairs[:, 1]] = True
-        
         # 全ての(i,j)の組み合わせに対してベクトル演算
         # u_diff[i,j] = u_sol[i] - u_sol[j]
         u_diff = u_sol[:, np.newaxis] - u_sol[np.newaxis, :]  # (J, J)
         
-        # points_diff[i,j] = points[i] - points[j] (形状: (J, J, 3))
-        points_diff = points_arr[:, np.newaxis, :] - points_arr[np.newaxis, :, :]  # (J, J, 3)
+        # points_diffは既にループ外で計算済み（再計算不要）
         
-        # inner_product[i,j] = p_sol[0,j] * (x_i[0] - x_j[0]) + p_sol[1,j] * (x_i[1] - x_j[1]) + p_sol[2,j] * (x_i[2] - x_j[2])
+        # inner_productをeinsumで計算（高速化）
+        # inner_product[i,j] = Σ_l p_sol[l,j] * points_diff[i,j,l]
         # p_solの形状は(3, J)、points_diffの形状は(J, J, 3)
-        # p_sol[l, j]を(J, J)にブロードキャスト: p_sol[l, :][np.newaxis, :] は (1, J) -> (J, J)にブロードキャスト
-        inner_product = (p_sol[0, :][np.newaxis, :] * points_diff[:, :, 0] +
-                         p_sol[1, :][np.newaxis, :] * points_diff[:, :, 1] +
-                         p_sol[2, :][np.newaxis, :] * points_diff[:, :, 2])  # 結果の形状: (J, J)
+        # einsum('lj,ijl->ij', p_sol, points_diff) で計算
+        inner_product = np.einsum('lj,ijl->ij', p_sol, points_diff)  # 結果の形状: (J, J)
         
         # 違反チェック: u_i - u_j < p_j・(x_i - x_j) - tol
         violation_mask = (u_diff < inner_product - tol) & (~constraint_mask)
         
-        # 違反している(i,j)のペアを取得
-        violation_indices = np.where(violation_mask)
-        violations = list(zip(violation_indices[0], violation_indices[1]))
+        # 違反している(i,j)のペアを取得（np.argwhereで直接取得）
+        violation_pairs = np.argwhere(violation_mask)  # (N_violations, 2)
+        violations = [(int(i), int(j)) for i, j in violation_pairs]
         
         # 違反がなければ終了
         if not violations:
@@ -304,25 +310,30 @@ def solve_mechanism_iterative(points, weights, grid_sizes, solver=None, max_iter
             return status, obj_val, u_sol, p_sol, iteration + 1
         
         # 違反している制約を追加（バッチ処理で高速化）
-        # NumPy配列から直接取得して高速化
+        # 差分行列から直接参照して高速化
         for i, j in violations:
-            x_i = points_arr[i]  # NumPy配列から直接取得
-            x_j = points_arr[j]  # NumPy配列から直接取得
+            # 差分行列から直接参照（points_diff[i, j, :]）
             constraint = u[i] >= u[j] + (
-                p[(0, j)] * (x_i[0] - x_j[0])
-                + p[(1, j)] * (x_i[1] - x_j[1])
-                + p[(2, j)] * (x_i[2] - x_j[2])
+                p[(0, j)] * points_diff[i, j, 0]
+                + p[(1, j)] * points_diff[i, j, 1]
+                + p[(2, j)] * points_diff[i, j, 2]
             )
             prob += constraint, f"convex_{i}_{j}_iter{iteration}"
             added_constraints.add((i, j))
+            # 制約マスクを更新（違反分だけTrueに設定）
+            constraint_mask[i, j] = True
         
         print(f"Iteration {iteration + 1}: {len(violations)} violations found, added {len(violations)} constraints")
     
     # 最大反復回数に達した場合
     status = pulp.LpStatus[prob.status]
     obj_val = pulp.value(prob.objective)
-    u_sol = np.array([u[j].varValue for j in range(J)], dtype=np.float64)
-    p_sol = np.array([[p[(l, j)].varValue for j in range(J)] for l in range(3)], dtype=np.float64)
+    # np.fromiterを使用してPythonループを削減
+    u_sol = np.fromiter((u[j].varValue for j in range(J)), dtype=np.float64, count=J)
+    p_sol = np.array([
+        np.fromiter((p[(l, j)].varValue for j in range(J)), dtype=np.float64, count=J)
+        for l in range(3)
+    ], dtype=np.float64)
     return status, obj_val, u_sol, p_sol, max_iter
 
 
