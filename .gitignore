@@ -54,6 +54,3 @@ gurobi.lic
 
 # Logs
 *.log
-
-# Data
-data/

@@ -1,0 +1,6 @@
+status: Optimal
+obj_val: 0.9481538984183505
+J: 1000
+timestamp: 2025-12-03T13:50:05.769461
+grid_sizes: (10, 10, 10)
+n_iter: 1
