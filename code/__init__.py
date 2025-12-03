@@ -21,6 +21,16 @@ from .primal_2agents import (
     save_results_2agents,
     load_results_2agents
 )
+from .primal_multi_agent import (
+    solve_mechanism_multi_agent,
+    solve_mechanism_2agents as solve_mechanism_2agents_multi,
+    solve_mechanism_multi_agent_iterative,
+    solve_mechanism_2agents_iterative as solve_mechanism_2agents_iterative_multi,
+    save_results_multi_agent,
+    save_results_2agents as save_results_2agents_multi,
+    load_results_multi_agent,
+    load_results_2agents as load_results_2agents_multi
+)
 from .dual import solve_dual, cost_snew, build_cost_matrix, discretize_signed_measure
 from .plot import classify_region, plot_polyhedral_regions
 
@@ -42,6 +52,14 @@ __all__ = [
     'solve_mechanism_2agents_iterative',
     'save_results_2agents',
     'load_results_2agents',
+    'solve_mechanism_multi_agent',
+    'solve_mechanism_2agents_multi',
+    'solve_mechanism_multi_agent_iterative',
+    'solve_mechanism_2agents_iterative_multi',
+    'save_results_multi_agent',
+    'save_results_2agents_multi',
+    'load_results_multi_agent',
+    'load_results_2agents_multi',
     'solve_dual',
     'cost_snew',
     'build_cost_matrix',
