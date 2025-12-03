@@ -18,7 +18,7 @@ import os
 from datetime import datetime
 
 
-def solve_mechanism_symmetry_2agents_with_synergy(points1, weights1, points2, weights2, solver=None):
+def solve_mechanism_symmetry_2agents_with_synergy(points1, weights1, solver=None):
     """
     Rochet–Choné 型の LP を構築して解く（2人2財1シナジー版、対称性制約あり）。
     
@@ -28,7 +28,7 @@ def solve_mechanism_symmetry_2agents_with_synergy(points1, weights1, points2, we
     - 対称性制約: u1 = u2, p1 = p2（points1 = points2, weights1 = weights2を仮定）
 
     型数: 
-        J1 = len(points1), J2 = len(points2)
+        J1 = len(points1), J2 = J1（対称性により）
     財数: 各参加者が2財1シナジー（pointsの次元は3である必要がある）
 
     変数:
@@ -37,8 +37,8 @@ def solve_mechanism_symmetry_2agents_with_synergy(points1, weights1, points2, we
                        l=0: 財a, l=1: 財b, l=2: シナジーα (0<=p<=1)
 
     目的関数:
-        max Σ_{j1, j2} w1[j1] * w2[j2] * (
-            p(j1,j2)・x1(j1) - u(j1,j2) + p(j1,j2)・x2(j2) - u(j1,j2)
+        max Σ_{j1, j2} w1[j1] * w1[j2] * (
+            p(j1,j2)・x1(j1) - u(j1,j2) + p(j1,j2)・x1(j2) - u(j1,j2)
         )
 
     制約:
@@ -52,26 +52,22 @@ def solve_mechanism_symmetry_2agents_with_synergy(points1, weights1, points2, we
     パラメータ:
         points1: list of tuples, 参加者1の型空間の点 [(x₁_a, x₁_b, x₁_α), ...] - 3次元
         weights1: list of floats, 参加者1の各点の重み w₁
-        points2: list of tuples, 参加者2の型空間の点 [(x₂_a, x₂_b, x₂_α), ...] - 3次元
-        weights2: list of floats, 参加者2の各点の重み w₂
         solver: PuLPソルバー（必須: Gurobi）
     
     戻り値:
         (status_string, objective_value, u1, u2, p1, p2)
-        - u1: np.ndarray, shape (J1, J2), u1[j1, j2] = 参加者1が型j1で参加者2が型j2のときの参加者1の効用
-        - u2: np.ndarray, shape (J1, J2), u2[j1, j2] = 参加者1が型j1で参加者2が型j2のときの参加者2の効用
-        - p1: np.ndarray, shape (3, J1, J2), p1[l, j1, j2] = 参加者1への財lの配分確率 (l=0,1,2)
-        - p2: np.ndarray, shape (3, J1, J2), p2[l, j1, j2] = 参加者2への財lの配分確率 (l=0,1,2)
+        - u1: np.ndarray, shape (J1, J1), u1[j1, j2] = 参加者1が型j1で参加者2が型j2のときの参加者1の効用
+        - u2: np.ndarray, shape (J1, J1), u2[j1, j2] = 参加者1が型j1で参加者2が型j2のときの参加者2の効用（対称性によりu2 = u1）
+        - p1: np.ndarray, shape (3, J1, J1), p1[l, j1, j2] = 参加者1への財lの配分確率 (l=0,1,2)
+        - p2: np.ndarray, shape (3, J1, J1), p2[l, j1, j2] = 参加者2への財lの配分確率 (l=0,1,2)（対称性によりp2 = p1）
     """
     J1 = len(points1)
-    J2 = len(points2)
+    J2 = J1  # 対称性により、J2 = J1
     
     # pointsとweightsをNumPy配列に変換（一度だけ、高速化のため）
     # 対称性により、points1 = points2、weights1 = weights2なので、1つだけ使用
     points1_arr = np.asarray(points1, dtype=np.float64)  # (J1, 3)
     weights1_arr = np.asarray(weights1, dtype=np.float64)  # (J1,)
-    points2_arr = points1_arr  # 参照のみ（メモリ節約）
-    weights2_arr = weights1_arr  # 参照のみ（メモリ節約）
 
     # 差分行列を一括計算（ループ外で一度だけ）
     # 対称性により、points1 = points2なので、1つの差分行列のみ計算
@@ -101,11 +97,11 @@ def solve_mechanism_symmetry_2agents_with_synergy(points1, weights1, points2, we
     }
 
     # ========== 目的関数 ==========
-    # max Σ_{j1, j2} w1[j1] * w2[j2] * (
-    #     p(j1,j2)・x1(j1) - u(j1,j2) + p(j1,j2)・x2(j2) - u(j1,j2)
+    # max Σ_{j1, j2} w1[j1] * w1[j2] * (
+    #     p(j1,j2)・x1(j1) - u(j1,j2) + p(j1,j2)・x1(j2) - u(j1,j2)
     # )
-    # = max Σ_{j1, j2} w1[j1] * w2[j2] * (
-    #     p(j1,j2)・(x1(j1) + x2(j2)) - 2*u(j1,j2)
+    # = max Σ_{j1, j2} w1[j1] * w1[j2] * (
+    #     p(j1,j2)・(x1(j1) + x1(j2)) - 2*u(j1,j2)
     # )
     # 対称性により、u[(j1,j2)] = u[(j2,j1)]、p[(l,j1,j2)] = p[(l,j2,j1)]なので、
     # j1 <= j2の範囲で計算し、j1 != j2の場合は2倍にする
@@ -185,7 +181,7 @@ def solve_mechanism_symmetry_2agents_with_synergy(points1, weights1, points2, we
     return status, obj_val, u1_sol, u2_sol, p1_sol, p2_sol
 
 
-def solve_mechanism_symmetry_2agents_with_synergy_iterative(points1, weights1, grid_sizes1, points2, weights2, grid_sizes2,
+def solve_mechanism_symmetry_2agents_with_synergy_iterative(points1, weights1, grid_sizes1,
                                                              solver=None, max_iter=100, tol=1e-6):
     """
     反復的制約追加アルゴリズムによるRochet-Choné型LPの求解（2人2財1シナジー版、対称性制約あり）。
@@ -201,9 +197,6 @@ def solve_mechanism_symmetry_2agents_with_synergy_iterative(points1, weights1, g
         points1: list of tuples, 参加者1の型空間の点 (x₁_a, x₁_b, x₁_α) - 3次元
         weights1: list of floats, 参加者1の各点の重み
         grid_sizes1: tuple, 参加者1の各次元のグリッドサイズ (nx1, ny1, nz1)
-        points2: list of tuples, 参加者2の型空間の点 (x₂_a, x₂_b, x₂_α) - 3次元
-        weights2: list of floats, 参加者2の各点の重み
-        grid_sizes2: tuple, 参加者2の各次元のグリッドサイズ (nx2, ny2, nz2)
         solver: PuLPソルバー（必須: Gurobi）
         max_iter: 最大反復回数
         tol: 違反判定の許容誤差
@@ -212,16 +205,13 @@ def solve_mechanism_symmetry_2agents_with_synergy_iterative(points1, weights1, g
         (status_string, objective_value, u1, u2, p1, p2, n_iterations)
     """
     J1 = len(points1)
-    J2 = len(points2)
+    J2 = J1  # 対称性により、J2 = J1
     nx1, ny1, nz1 = grid_sizes1
-    nx2, ny2, nz2 = grid_sizes2
     
     # pointsをNumPy配列に変換
     # 対称性により、points1 = points2なので、1つだけ使用
     points1_arr = np.asarray(points1, dtype=np.float64)  # (J1, 3)
-    points2_arr = points1_arr  # 参照のみ（メモリ節約）
     weights1_arr = np.asarray(weights1, dtype=np.float64)  # (J1,)
-    weights2_arr = weights1_arr  # 参照のみ（メモリ節約）
     
     # グリッドインデックスを計算する関数
     def get_grid_indices_1(point_idx):
@@ -413,9 +403,9 @@ def solve_mechanism_symmetry_2agents_with_synergy_iterative(points1, weights1, g
 
 
 def save_results_symmetry_2agents_with_synergy(
-    points1, weights1, points2, weights2,
-    u1_sol, u2_sol, p1_sol, p2_sol,
+    points1, weights1, u1_sol, u2_sol, p1_sol, p2_sol,
     obj_val, status,
+    points2=None, weights2=None,
     grid_sizes1=None, grid_sizes2=None, n_iter=None,
     filename=None, data_dir="data"
 ):
@@ -425,16 +415,16 @@ def save_results_symmetry_2agents_with_synergy(
     パラメータ:
         points1: 参加者1の型空間の点 (list or np.ndarray)
         weights1: 参加者1の各点の重み (list or np.ndarray)
-        points2: 参加者2の型空間の点 (list or np.ndarray)
-        weights2: 参加者2の各点の重み (list or np.ndarray)
         u1_sol: 参加者1の効用 (np.ndarray, shape: (J1, J2))
         u2_sol: 参加者2の効用 (np.ndarray, shape: (J1, J2))
         p1_sol: 参加者1の配分確率 (np.ndarray, shape: (3, J1, J2))
         p2_sol: 参加者2の配分確率 (np.ndarray, shape: (3, J1, J2))
         obj_val: 目的関数値 (float)
         status: LPステータス (str)
+        points2: 参加者2の型空間の点 (list or np.ndarray, optional, 対称性によりpoints1と同じ)
+        weights2: 参加者2の各点の重み (list or np.ndarray, optional, 対称性によりweights1と同じ)
         grid_sizes1: 参加者1のグリッドサイズ (tuple, optional)
-        grid_sizes2: 参加者2のグリッドサイズ (tuple, optional)
+        grid_sizes2: 参加者2のグリッドサイズ (tuple, optional, 対称性によりgrid_sizes1と同じ)
         n_iter: 反復回数 (int, optional)
         filename: 保存ファイル名 (str, optional, 指定しない場合は自動生成)
         data_dir: データ保存ディレクトリ (str, default: "data")
@@ -451,6 +441,14 @@ def save_results_symmetry_2agents_with_synergy(
         filename = f"results_symmetry_2agents_synergy_{timestamp}.npz"
     
     filepath = os.path.join(data_dir, filename)
+    
+    # 対称性により、points2とweights2が指定されていない場合はpoints1とweights1を使用
+    if points2 is None:
+        points2 = points1
+    if weights2 is None:
+        weights2 = weights1
+    if grid_sizes2 is None:
+        grid_sizes2 = grid_sizes1
     
     # NumPy配列に変換
     points1_arr = np.array(points1, dtype=np.float64)

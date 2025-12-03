@@ -52,9 +52,6 @@ def plot_polyhedral_regions(points_arr, p_arr, q_arr, title="Allocation Regions"
         title: プロットのタイトル (str)
         figsize: 図のサイズ (tuple)
         thresholds: 領域分類の閾値 (list)
-    
-    戻り値:
-        region_groups: 領域ごとの点のインデックスの辞書
     """
     # NumPy配列に変換
     points_arr = np.array(points_arr, dtype=np.float64)
@@ -165,6 +162,4 @@ def plot_polyhedral_regions(points_arr, p_arr, q_arr, title="Allocation Regions"
     print(f"領域の統計:")
     for region_name in sorted(region_groups.keys()):
         print(f"  {region_name}: {len(region_groups[region_name])} 点")
-    
-    return region_groups
 
