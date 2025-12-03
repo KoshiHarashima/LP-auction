@@ -191,6 +191,83 @@ def solve_mechanism_2agents(points1, weights1, points2, weights2, solver=None):
             
             # 下界制約（inclusion-exclusion）: p2[2,j1,j2] >= p2[0,j1,j2] + p2[1,j1,j2] - 1
             prob += p2[(2, j1, j2)] >= p2[(0, j1, j2)] + p2[(1, j1, j2)] - 1, f"synergy2_{j1}_{j2}_lower"
+    
+    # 7. Implementability制約（凸結合条件）
+    # Cursor.md参照: u_{1,\{a\}} = p1[0], u_{1,\{b\}} = p1[1], u_{1,\{\alpha\}} = p1[2]
+    # u_{2,\{a\}} = p2[0], u_{2,\{b\}} = p2[1], u_{2,\{\alpha\}} = p2[2]
+    # 画像の制約に基づく実装
+    for j1 in range(J1):
+        for j2 in range(J2):
+            # 記号の対応:
+            # u_1,{a} = p1[0, j1, j2]
+            # u_1,{b} = p1[1, j1, j2]
+            # u_1,{α} = p1[2, j1, j2]
+            # u_2,{a} = p2[0, j1, j2]
+            # u_2,{b} = p2[1, j1, j2]
+            # u_2,{α} = p2[2, j1, j2]
+            
+            # 制約1: 0 <= u_1,{α} <= 1, 0 <= u_2,{α} <= 1
+            # (既に変数の定義で 0 <= p1[2] <= 1, 0 <= p2[2] <= 1 として設定済み)
+            
+            # 制約2: max{0, u_1,{α} - u_1,{a}, u_2,{α} - u_2,{b}} <= min{u_1,{a} - u_1,{α}, u_2,{b} - u_2,{α}, 1}
+            # これは以下の制約に分解:
+            # - u_1,{α} - u_1,{a} <= u_1,{a} - u_1,{α}  (これは常に成り立つ: p1[2] - p1[0] <= p1[0] - p1[2] は 2*p1[2] <= 2*p1[0] と等価)
+            # - u_1,{α} - u_1,{a} <= u_2,{b} - u_2,{α}
+            # - u_1,{α} - u_1,{a} <= 1
+            # - u_2,{α} - u_2,{b} <= u_1,{a} - u_1,{α}
+            # - u_2,{α} - u_2,{b} <= u_2,{b} - u_2,{α}  (これは常に成り立つ)
+            # - u_2,{α} - u_2,{b} <= 1
+            # - 0 <= u_1,{a} - u_1,{α}  (これは p1[0] >= p1[2] で、シナジー制約から既に保証されている)
+            # - 0 <= u_2,{b} - u_2,{α}  (これは p2[1] >= p2[2] で、シナジー制約から既に保証されている)
+            # - 0 <= 1  (常に成り立つ)
+            
+            # 実質的に必要な制約:
+            prob += p1[(2, j1, j2)] - p1[(0, j1, j2)] <= p2[(1, j1, j2)] - p2[(2, j1, j2)], f"impl_max1_{j1}_{j2}"
+            prob += p1[(2, j1, j2)] - p1[(0, j1, j2)] <= 1.0, f"impl_max2_{j1}_{j2}"
+            prob += p2[(2, j1, j2)] - p2[(1, j1, j2)] <= p1[(0, j1, j2)] - p1[(2, j1, j2)], f"impl_max3_{j1}_{j2}"
+            prob += p2[(2, j1, j2)] - p2[(1, j1, j2)] <= 1.0, f"impl_max4_{j1}_{j2}"
+            
+            # 制約3: max{0, u_1,{a,b,α} - u_1,{b}, u_2,{a,b,α} - u_2,{a}} <= min{u_1,{b} - u_1,{a}, u_2,{a} - u_2,{a}, 1}
+            # 注: u_1,{a,b,α} は参加者1が財a, b, αをすべて獲得する確率
+            # シナジーの制約から、これは min{p1[0], p1[1], p1[2]} で近似される
+            # より正確には、p1[2] (シナジーαの配分確率) が p1[0] と p1[1] の両方以下であることから
+            # u_1,{a,b,α} ≈ p1[2] と近似できる
+            # 同様に、u_2,{a,b,α} ≈ p2[2] と近似できる
+            
+            # min{u_1,{b} - u_1,{a}, u_2,{a} - u_2,{a}, 1} = min{p1[1] - p1[0], 0, 1} = min{p1[1] - p1[0], 0}
+            # p1[1] - p1[0] が負の場合は 0、正の場合は p1[1] - p1[0] と 1 の最小値
+            
+            # 実質的に必要な制約:
+            # - u_1,{a,b,α} - u_1,{b} <= u_1,{b} - u_1,{a}  (p1[2] - p1[1] <= p1[1] - p1[0])
+            # - u_1,{a,b,α} - u_1,{b} <= 0  (p1[2] - p1[1] <= 0, これはシナジー制約から既に保証されている)
+            # - u_1,{a,b,α} - u_1,{b} <= 1  (p1[2] - p1[1] <= 1, これは常に成り立つ)
+            # - u_2,{a,b,α} - u_2,{a} <= u_1,{b} - u_1,{a}  (p2[2] - p2[0] <= p1[1] - p1[0])
+            # - u_2,{a,b,α} - u_2,{a} <= 0  (p2[2] - p2[0] <= 0, これはシナジー制約から既に保証されている)
+            # - u_2,{a,b,α} - u_2,{a} <= 1  (p2[2] - p2[0] <= 1, これは常に成り立つ)
+            
+            # 実質的に必要な制約（既に保証されているものを除く）:
+            prob += p1[(2, j1, j2)] - p1[(1, j1, j2)] <= p1[(1, j1, j2)] - p1[(0, j1, j2)], f"impl_max2_1_{j1}_{j2}"
+            prob += p2[(2, j1, j2)] - p2[(0, j1, j2)] <= p1[(1, j1, j2)] - p1[(0, j1, j2)], f"impl_max2_2_{j1}_{j2}"
+            
+            # 制約4: u_1,{a} + u_1,{b} + u_2,{a} + u_2,{b} - u_1,{α} - u_2,{α} <= 1
+            prob += (p1[(0, j1, j2)] + p1[(1, j1, j2)] + p2[(0, j1, j2)] + p2[(1, j1, j2)]
+                     - p1[(2, j1, j2)] - p2[(2, j1, j2)] <= 1.0, f"impl_sum_{j1}_{j2}")
+            
+            # 補助変数: a_7^min = max{0, u_1,{a} - u_1,{α} - 1, u_2,{b} - u_2,{α} - 1}
+            a7_min = pulp.LpVariable(f"a7_min_{j1}_{j2}", lowBound=0.0, cat=pulp.LpContinuous)
+            prob += a7_min >= 0.0, f"impl_a7_0_{j1}_{j2}"
+            prob += a7_min >= p1[(0, j1, j2)] - p1[(2, j1, j2)] - 1.0, f"impl_a7_1_{j1}_{j2}"
+            prob += a7_min >= p2[(1, j1, j2)] - p2[(2, j1, j2)] - 1.0, f"impl_a7_2_{j1}_{j2}"
+            
+            # 補助変数: a_8^min = max{0, u_1,{b} - u_1,{α} - 1, u_2,{a} - u_2,{α} - 1}
+            a8_min = pulp.LpVariable(f"a8_min_{j1}_{j2}", lowBound=0.0, cat=pulp.LpContinuous)
+            prob += a8_min >= 0.0, f"impl_a8_0_{j1}_{j2}"
+            prob += a8_min >= p1[(1, j1, j2)] - p1[(2, j1, j2)] - 1.0, f"impl_a8_1_{j1}_{j2}"
+            prob += a8_min >= p2[(0, j1, j2)] - p2[(2, j1, j2)] - 1.0, f"impl_a8_2_{j1}_{j2}"
+            
+            # 追加制約: u_1,{a} + u_1,{b} + u_2,{a} + u_2,{b} - u_1,{α} - u_2,{α} <= 1 + a_7^min + a_8^min
+            prob += (p1[(0, j1, j2)] + p1[(1, j1, j2)] + p2[(0, j1, j2)] + p2[(1, j1, j2)]
+                     - p1[(2, j1, j2)] - p2[(2, j1, j2)] <= 1.0 + a7_min + a8_min, f"impl_sum2_{j1}_{j2}")
 
     # ========== 解く ==========
     prob.solve(solver)
@@ -374,6 +451,39 @@ def solve_mechanism_2agents_iterative(points1, weights1, grid_sizes1, points2, w
             prob += p2[(2, j1, j2)] <= p2[(0, j1, j2)], f"synergy2_item0_{j1}_{j2}_upper"
             prob += p2[(2, j1, j2)] <= p2[(1, j1, j2)], f"synergy2_item1_{j1}_{j2}_upper"
             prob += p2[(2, j1, j2)] >= p2[(0, j1, j2)] + p2[(1, j1, j2)] - 1, f"synergy2_{j1}_{j2}_lower"
+    
+    # Implementability制約（凸結合条件）- 反復版にも追加
+    for j1 in range(J1):
+        for j2 in range(J2):
+            # 制約2: max{0, u_1,{α} - u_1,{a}, u_2,{α} - u_2,{b}} <= min{u_1,{a} - u_1,{α}, u_2,{b} - u_2,{α}, 1}
+            prob += p1[(2, j1, j2)] - p1[(0, j1, j2)] <= p2[(1, j1, j2)] - p2[(2, j1, j2)], f"impl_max1_{j1}_{j2}_iter"
+            prob += p1[(2, j1, j2)] - p1[(0, j1, j2)] <= 1.0, f"impl_max2_{j1}_{j2}_iter"
+            prob += p2[(2, j1, j2)] - p2[(1, j1, j2)] <= p1[(0, j1, j2)] - p1[(2, j1, j2)], f"impl_max3_{j1}_{j2}_iter"
+            prob += p2[(2, j1, j2)] - p2[(1, j1, j2)] <= 1.0, f"impl_max4_{j1}_{j2}_iter"
+            
+            # 制約3: max{0, u_1,{a,b,α} - u_1,{b}, u_2,{a,b,α} - u_2,{a}} <= min{u_1,{b} - u_1,{a}, u_2,{a} - u_2,{a}, 1}
+            prob += p1[(2, j1, j2)] - p1[(1, j1, j2)] <= p1[(1, j1, j2)] - p1[(0, j1, j2)], f"impl_max2_1_{j1}_{j2}_iter"
+            prob += p2[(2, j1, j2)] - p2[(0, j1, j2)] <= p1[(1, j1, j2)] - p1[(0, j1, j2)], f"impl_max2_2_{j1}_{j2}_iter"
+            
+            # 制約4: u_1,{a} + u_1,{b} + u_2,{a} + u_2,{b} - u_1,{α} - u_2,{α} <= 1
+            prob += (p1[(0, j1, j2)] + p1[(1, j1, j2)] + p2[(0, j1, j2)] + p2[(1, j1, j2)]
+                     - p1[(2, j1, j2)] - p2[(2, j1, j2)] <= 1.0, f"impl_sum_{j1}_{j2}_iter")
+            
+            # 補助変数: a_7^min = max{0, u_1,{a} - u_1,{α} - 1, u_2,{b} - u_2,{α} - 1}
+            a7_min = pulp.LpVariable(f"a7_min_{j1}_{j2}_iter", lowBound=0.0, cat=pulp.LpContinuous)
+            prob += a7_min >= 0.0, f"impl_a7_0_{j1}_{j2}_iter"
+            prob += a7_min >= p1[(0, j1, j2)] - p1[(2, j1, j2)] - 1.0, f"impl_a7_1_{j1}_{j2}_iter"
+            prob += a7_min >= p2[(1, j1, j2)] - p2[(2, j1, j2)] - 1.0, f"impl_a7_2_{j1}_{j2}_iter"
+            
+            # 補助変数: a_8^min = max{0, u_1,{b} - u_1,{α} - 1, u_2,{a} - u_2,{α} - 1}
+            a8_min = pulp.LpVariable(f"a8_min_{j1}_{j2}_iter", lowBound=0.0, cat=pulp.LpContinuous)
+            prob += a8_min >= 0.0, f"impl_a8_0_{j1}_{j2}_iter"
+            prob += a8_min >= p1[(1, j1, j2)] - p1[(2, j1, j2)] - 1.0, f"impl_a8_1_{j1}_{j2}_iter"
+            prob += a8_min >= p2[(0, j1, j2)] - p2[(2, j1, j2)] - 1.0, f"impl_a8_2_{j1}_{j2}_iter"
+            
+            # 追加制約: u_1,{a} + u_1,{b} + u_2,{a} + u_2,{b} - u_1,{α} - u_2,{α} <= 1 + a_7^min + a_8^min
+            prob += (p1[(0, j1, j2)] + p1[(1, j1, j2)] + p2[(0, j1, j2)] + p2[(1, j1, j2)]
+                     - p1[(2, j1, j2)] - p2[(2, j1, j2)] <= 1.0 + a7_min + a8_min, f"impl_sum2_{j1}_{j2}_iter")
     
     # 局所的なIC制約（参加者1: 隣接点のみ）
     local_constraints1 = set()
