@@ -1,0 +1,43 @@
+# Core dependencies
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Web framework (choose one based on your needs)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+# flask>=3.0.0
+# flask-cors>=4.0.0
+
+# Database
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+# psycopg2-binary>=2.9.9  # PostgreSQL
+# pymongo>=4.6.0  # MongoDB
+
+# HTTP client
+httpx>=0.25.0
+requests>=2.31.0
+
+# Data processing
+pandas>=2.1.0
+numpy>=1.26.0
+matplotlib>=3.8.0
+
+# Optimization
+pulp>=2.7.0
+
+# Utilities
+python-dateutil>=2.8.2
+pytz>=2023.3
+
+# Testing (optional)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Code quality (optional)
+black>=23.11.0
+flake8>=6.1.0
+mypy>=1.7.0
+
