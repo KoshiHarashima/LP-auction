@@ -21,6 +21,7 @@ from .primal_2agents import (
     save_results_2agents,
     load_results_2agents
 )
+
 from .primal_multi_agent import (
     solve_mechanism_multi_agent,
     solve_mechanism_2agents as solve_mechanism_2agents_multi,

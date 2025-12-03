@@ -1,0 +1,7 @@
+status: Optimal
+obj_val: 1.2640000000000262
+n_agents: 2
+timestamp: 2025-12-03T00:47:16.499268
+grid_sizes0: (5, 5)
+grid_sizes1: (5, 5)
+n_iter: 1

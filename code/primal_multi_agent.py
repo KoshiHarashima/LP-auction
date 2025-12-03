@@ -348,6 +348,8 @@ def solve_mechanism_multi_agent_iterative(points_list, weights_list, grid_sizes_
             neighbors_i = get_neighbors(i, i_i)
             x_i_i = points_arr_list[i][i_i]
             
+            other_indices = [range(J_list[j]) for j in range(n_agents) if j != i]
+            for other_comb in product(*other_indices):
                 indices_i = tuple(list(other_comb[:i]) + [i_i] + list(other_comb[i:]))
                 
                 for k_i in neighbors_i:
