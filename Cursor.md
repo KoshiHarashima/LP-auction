@@ -87,7 +87,7 @@ Dual問題は最適輸送問題として定式化され、以下に使用され�
 
 シナジーの配分制約は, 以下である. 
 
-$$
+```math
 \begin{align}
 &u_{\alpha_{1,2}}(x) \le u_{1}(x),\\
 &u_{\alpha_{1,2}}(x) \le u_{2}(x),\\
@@ -109,7 +109,7 @@ $$
 &u_{\alpha_{1,2,3}}(x) \ge u_{\alpha_{3,1}}(x) + u_{2}(x) -1\\
 &u_{\alpha_{1,2,3}}(x) \ge u_{\alpha_{1,2}}(x)+u_{\alpha_{2,3}}(x)+u_{\alpha_{3,1}}(x) -u_{1}(x) -u_{2}(x) - u_{3}(x) + 1
 \end{align}
-$$
+```
 
 
 ## 2人の2財1シナジー
@@ -144,9 +144,9 @@ i(1と2)さんと、jがグリッドのindex（5だったら125個ある）
 - **w[j]**: グリッド点jでの型分布の重み
 
 #### 目的関数
-$$
+```math
 \max \sum_{i=1}^{2} \sum_{j} w_j (\mathbf{u}_{i,j}^{\top} \mathbf{x}_j - u_{ij})
-$$
+```
 
 ここで：
 - $\mathbf{u}_{i,j}^{\top} \mathbf{x}_j$ はベクトルの内積（$\mathbf{u}_{i,j}$は$\mathbf{p}_i(j)$を意味する）
@@ -158,73 +158,73 @@ $$
 各参加者について、自分の型を正直に報告することが最適であることを保証：
 
 **参加者1について:**
-$$
+```math
 u_1(i) \ge u_1(j) + \mathbf{p}_1(j)^{\top}(\mathbf{x}_1(i) - \mathbf{x}_1(j)) \quad \forall i, j
-$$
+```
 
 **参加者2について:**
-$$
+```math
 u_2(i) \ge u_2(j) + \mathbf{p}_2(j)^{\top}(\mathbf{x}_2(i) - \mathbf{x}_2(j)) \quad \forall i, j
-$$
+```
 
 ##### 2. 1-Lipschitz制約
 各財の配分確率が有界であることを保証：
-$$
+```math
 0 \le u_{1,\{k\}} \le 1, \quad 0 \le u_{2,\{k\}} \le 1 \quad \forall k \in \{1\}, \{2\}, \{3\}
-$$
+```
 
 ここで、$\{1\}, \{2\}, \{3\}$はそれぞれ財a、財b、シナジーαに対応。
 
 ##### 3. IR（個人合理性）
-$$
+```math
 u_1(x) = 0, \quad u_2(x) = 0 \quad \forall x
-$$
+```
 
 ##### 4. シナジー条件
 各参加者について、シナジーαの配分確率が財aと財bの配分確率と整合的であることを保証：
 
 **参加者1について:**
-$$
+```math
 \begin{align}
 u_{1,\alpha}(x) &\le u_{1,a}(x) \\
 u_{1,\alpha}(x) &\le u_{1,b}(x) \\
 u_{1,\alpha}(x) &\ge u_{1,a}(x) + u_{1,b}(x) - 1
 \end{align}
-$$
+```
 
 **参加者2について:**
-$$
+```math
 \begin{align}
 u_{2,\alpha}(x) &\le u_{2,a}(x) \\
 u_{2,\alpha}(x) &\le u_{2,b}(x) \\
 u_{2,\alpha}(x) &\ge u_{2,a}(x) + u_{2,b}(x) - 1
 \end{align}
-$$
+```
 
 ##### 5. Implementability（凸結合条件）
 Appendix参照。以下のような制約が追加される：
 
-$$
+```math
 \begin{align}
 0 &\le u_{1,\{\alpha\}} \le 1, \quad 0 \le u_{2,\{\alpha\}} \le 1 \\
 \max\{0, u_{1,\{\alpha\}} - u_{1,\{a\}}, u_{2,\{\alpha\}} - u_{2,\{b\}}\} &\le \min\{u_{1,\{a\}} - u_{1,\{\alpha\}}, u_{2,\{b\}} - u_{2,\{\alpha\}}, 1\} \\
 \max\{0, u_{1,\{a,b,\alpha\}} - u_{1,\{b\}}, u_{2,\{a,b,\alpha\}} - u_{2,\{a\}}\} &\le \min\{u_{1,\{b\}} - u_{1,\{a\}}, u_{2,\{a\}} - u_{2,\{a\}}, 1\} \\
 u_{1,\{a\}} + u_{1,\{b\}} + u_{2,\{a\}} + u_{2,\{b\}} - u_{1,\{\alpha\}} - u_{2,\{\alpha\}} &\le 1
 \end{align}
-$$
+```
 
 補助変数：
-$$
+```math
 \begin{align}
 a_7^{\min} &= \max\{0, u_{1,\{a\}} - u_{1,\{\alpha\}} - 1, u_{2,\{b\}} - u_{2,\{\alpha\}} - 1\} \\
 a_8^{\min} &= \max\{0, u_{1,\{b\}} - u_{1,\{\alpha\}} - 1, u_{2,\{a\}} - u_{2,\{\alpha\}} - 1\}
 \end{align}
-$$
+```
 
 追加制約：
-$$
+```math
 u_{1,\{a\}} + u_{1,\{b\}} + u_{2,\{a\}} + u_{2,\{b\}} - u_{1,\{\alpha\}} - u_{2,\{\alpha\}} \le 1 + a_7^{\min} + a_8^{\min}
-$$
+```
 
 ### 実装上の考慮事項
 - グリッドサイズが大きくなると、変数の数が O(N₁³ × N₂³) となり、計算量が急増する
