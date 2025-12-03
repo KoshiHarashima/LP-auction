@@ -206,7 +206,8 @@ Appendix参照。以下のような制約が追加される：
 
 ```math
 \begin{align}
-0 &\le u_{1,\{\alpha\}} \le 1, \quad 0 \le u_{2,\{\alpha\}} \le 1 \\
+0 &\le u_{1,\{\alpha\}} \le 1,\\
+0 &\le u_{2,\{\alpha\}} \le 1 \\
 \max\{0, u_{1,\{\alpha\}} - u_{1,\{a\}}, u_{2,\{\alpha\}} - u_{2,\{b\}}\} &\le \min\{u_{1,\{a\}} - u_{1,\{\alpha\}}, u_{2,\{b\}} - u_{2,\{\alpha\}}, 1\} \\
 \max\{0, u_{1,\{a,b,\alpha\}} - u_{1,\{b\}}, u_{2,\{a,b,\alpha\}} - u_{2,\{a\}}\} &\le \min\{u_{1,\{b\}} - u_{1,\{a\}}, u_{2,\{a\}} - u_{2,\{a\}}, 1\} \\
 u_{1,\{a\}} + u_{1,\{b\}} + u_{2,\{a\}} + u_{2,\{b\}} - u_{1,\{\alpha\}} - u_{2,\{\alpha\}} &\le 1
