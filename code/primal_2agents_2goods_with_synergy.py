@@ -109,6 +109,8 @@ def solve_mechanism_2agents(points1, weights1, points2, weights2, solver=None):
 
     # 変数 p1[l, j1, j2] (参加者1の配分確率のベクトル: l=0,1,2)
     # l=0: 財a, l=1: 財b, l=2: シナジーα
+    # Feasibility制約により、0 ≤ p1[l,j1,j2] + p2[l,j1,j2] ≤ 1
+    # 各変数は0以上1以下だが、和の制約は別途追加
     p1 = {
         (l, j1, j2): pulp.LpVariable(f"p1_{l}_{j1}_{j2}", lowBound=0.0, upBound=1.0, cat=pulp.LpContinuous)
         for l in range(3)
@@ -152,6 +154,20 @@ def solve_mechanism_2agents(points1, weights1, points2, weights2, solver=None):
     
     # 2. 1-Lipschitz制約: 0 ≤ p1[l,j1,j2] ≤ 1, 0 ≤ p2[l,j1,j2] ≤ 1
     # 変数の定義で既に lowBound=0.0, upBound=1.0 として設定済み
+    
+    # 2.5. Feasibility制約（itemのallocation）: 0 ≤ p1[l,j1,j2] + p2[l,j1,j2] ≤ 1
+    # 両方のエージェントの配分確率の和が1以下であることを保証
+    for j1 in range(J1):
+        for j2 in range(J2):
+            # 財a: 0 ≤ p1[0,j1,j2] + p2[0,j1,j2] ≤ 1
+            prob += p1[(0, j1, j2)] + p2[(0, j1, j2)] >= 0, f"feasibility_a_{j1}_{j2}_lower"
+            prob += p1[(0, j1, j2)] + p2[(0, j1, j2)] <= 1, f"feasibility_a_{j1}_{j2}_upper"
+            # 財b: 0 ≤ p1[1,j1,j2] + p2[1,j1,j2] ≤ 1
+            prob += p1[(1, j1, j2)] + p2[(1, j1, j2)] >= 0, f"feasibility_b_{j1}_{j2}_lower"
+            prob += p1[(1, j1, j2)] + p2[(1, j1, j2)] <= 1, f"feasibility_b_{j1}_{j2}_upper"
+            # シナジーα: 0 ≤ p1[2,j1,j2] + p2[2,j1,j2] ≤ 1
+            prob += p1[(2, j1, j2)] + p2[(2, j1, j2)] >= 0, f"feasibility_alpha_{j1}_{j2}_lower"
+            prob += p1[(2, j1, j2)] + p2[(2, j1, j2)] <= 1, f"feasibility_alpha_{j1}_{j2}_upper"
     
     # 3. IC制約（参加者1）: u1(i1, j2) >= u1(k1, j2) + p1(k1, j2)・(x1(i1) - x1(k1)) for all i1, k1, j2
     # Cursor.md: u_1(i) \ge u_1(j) + \mathbf{p}_1(j)^{\top}(\mathbf{x}_1(i) - \mathbf{x}_1(j)) \quad \forall i, j
@@ -447,6 +463,19 @@ def solve_mechanism_2agents_iterative(points1, weights1, grid_sizes1, points2, w
             prob += p2[(2, j1, j2)] <= p2[(0, j1, j2)], f"synergy2_item0_{j1}_{j2}_upper"
             prob += p2[(2, j1, j2)] <= p2[(1, j1, j2)], f"synergy2_item1_{j1}_{j2}_upper"
             prob += p2[(2, j1, j2)] >= p2[(0, j1, j2)] + p2[(1, j1, j2)] - 1, f"synergy2_{j1}_{j2}_lower"
+    
+    # Feasibility制約（itemのallocation）: 0 ≤ p1[l,j1,j2] + p2[l,j1,j2] ≤ 1
+    for j1 in range(J1):
+        for j2 in range(J2):
+            # 財a: 0 ≤ p1[0,j1,j2] + p2[0,j1,j2] ≤ 1
+            prob += p1[(0, j1, j2)] + p2[(0, j1, j2)] >= 0, f"feasibility_a_{j1}_{j2}_lower_iter"
+            prob += p1[(0, j1, j2)] + p2[(0, j1, j2)] <= 1, f"feasibility_a_{j1}_{j2}_upper_iter"
+            # 財b: 0 ≤ p1[1,j1,j2] + p2[1,j1,j2] ≤ 1
+            prob += p1[(1, j1, j2)] + p2[(1, j1, j2)] >= 0, f"feasibility_b_{j1}_{j2}_lower_iter"
+            prob += p1[(1, j1, j2)] + p2[(1, j1, j2)] <= 1, f"feasibility_b_{j1}_{j2}_upper_iter"
+            # シナジーα: 0 ≤ p1[2,j1,j2] + p2[2,j1,j2] ≤ 1
+            prob += p1[(2, j1, j2)] + p2[(2, j1, j2)] >= 0, f"feasibility_alpha_{j1}_{j2}_lower_iter"
+            prob += p1[(2, j1, j2)] + p2[(2, j1, j2)] <= 1, f"feasibility_alpha_{j1}_{j2}_upper_iter"
     
     # Implementability制約（凸結合条件）- 反復版にも追加
     for j1 in range(J1):

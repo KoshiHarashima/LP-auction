@@ -192,9 +192,14 @@ def solve_mechanism_multi_agent(points_list, weights_list, solver=None):
 
 def solve_mechanism_2agents(points1, weights1, points2, weights2, solver=None):
     """
-    2人2財の最適オークション機構設計（シナジーなし、Implementability制約なし）。
+    2人2財の最適オークション機構設計（シナジーなし）。
     
-    solve_mechanism_multi_agentの2人版のラッパー関数。
+    画像の数式に基づく実装:
+    - 目的関数: Σ_{i=1}^{2} Σ_j w_j (u_{i,j}^T x_j - u_{ij})
+    - IC制約: u_1(i) ≥ u_1(j) + p_1(j)(x_1(i) - x_1(j)) ∀i, j
+              u_2(i) ≥ u_2(j) + p_2(j)(x_2(i) - x_2(j)) ∀i, j
+    - Feasibility制約: 0 ≤ u_{1,a}(x) + u_{2,a}(x) ≤ 1
+                       0 ≤ u_{1,b}(x) + u_{2,b}(x) ≤ 1
     
     パラメータ:
         points1: list of tuples, 参加者1の型空間の点 (x₁_a, x₁_b) - 2次元
@@ -210,16 +215,132 @@ def solve_mechanism_2agents(points1, weights1, points2, weights2, solver=None):
         - p1: np.ndarray, shape (2, J1, J2), p1[l, j1, j2] = 参加者1への財lの配分確率 (l=0,1)
         - p2: np.ndarray, shape (2, J1, J2), p2[l, j1, j2] = 参加者2への財lの配分確率 (l=0,1)
     """
-    status, obj_val, u_list, p_list = solve_mechanism_multi_agent(
-        [points1, points2], [weights1, weights2], solver=solver
+    J1 = len(points1)
+    J2 = len(points2)
+    
+    # pointsとweightsをNumPy配列に変換
+    points1_arr = np.asarray(points1, dtype=np.float64)  # (J1, 2)
+    points2_arr = np.asarray(points2, dtype=np.float64)  # (J2, 2)
+    weights1_arr = np.asarray(weights1, dtype=np.float64)  # (J1,)
+    weights2_arr = np.asarray(weights2, dtype=np.float64)  # (J2,)
+    
+    # 差分行列を一括計算（ループ外で一度だけ）
+    points1_diff = points1_arr[:, None, :] - points1_arr[None, :, :]  # (J1, J1, 2)
+    points2_diff = points2_arr[:, None, :] - points2_arr[None, :, :]  # (J2, J2, 2)
+    
+    # 問題設定
+    prob = pulp.LpProblem("RC_2agents_2goods", pulp.LpMaximize)
+    
+    # ========== 変数の定義 ==========
+    # 変数 u1[j1, j2] (参加者1の効用)
+    u1 = {
+        (j1, j2): pulp.LpVariable(f"u1_{j1}_{j2}", lowBound=0.0, cat=pulp.LpContinuous)
+        for j1 in range(J1)
+        for j2 in range(J2)
+    }
+    
+    # 変数 u2[j1, j2] (参加者2の効用)
+    u2 = {
+        (j1, j2): pulp.LpVariable(f"u2_{j1}_{j2}", lowBound=0.0, cat=pulp.LpContinuous)
+        for j1 in range(J1)
+        for j2 in range(J2)
+    }
+    
+    # 変数 p1[l, j1, j2] (参加者1の配分確率: l=0,1)
+    # l=0: 財a, l=1: 財b
+    p1 = {
+        (l, j1, j2): pulp.LpVariable(f"p1_{l}_{j1}_{j2}", lowBound=0.0, upBound=1.0, cat=pulp.LpContinuous)
+        for l in range(2)
+        for j1 in range(J1)
+        for j2 in range(J2)
+    }
+    
+    # 変数 p2[l, j1, j2] (参加者2の配分確率: l=0,1)
+    p2 = {
+        (l, j1, j2): pulp.LpVariable(f"p2_{l}_{j1}_{j2}", lowBound=0.0, upBound=1.0, cat=pulp.LpContinuous)
+        for l in range(2)
+        for j1 in range(J1)
+        for j2 in range(J2)
+    }
+    
+    # ========== 目的関数 ==========
+    # Σ_{i=1}^{2} Σ_j w_j (u_{i,j}^T x_j - u_{ij})
+    # = Σ_{j1, j2} w1[j1] * w2[j2] * (
+    #     (p1(j1,j2)・x1(j1) - u1(j1,j2)) + (p2(j1,j2)・x2(j2) - u2(j1,j2))
+    # )
+    objective = pulp.lpSum(
+        weights1_arr[j1] * weights2_arr[j2] * (
+            # 参加者1の項
+            p1[(0, j1, j2)] * points1_arr[j1, 0]  # 財a
+            + p1[(1, j1, j2)] * points1_arr[j1, 1]  # 財b
+            - u1[(j1, j2)]
+            # 参加者2の項
+            + p2[(0, j1, j2)] * points2_arr[j2, 0]  # 財a
+            + p2[(1, j1, j2)] * points2_arr[j2, 1]  # 財b
+            - u2[(j1, j2)]
+        )
+        for j1 in range(J1)
+        for j2 in range(J2)
     )
+    prob += objective
     
-    u1 = u_list[0]  # (J1, J2)
-    u2 = u_list[1]  # (J1, J2)
-    p1 = p_list[0]  # (2, J1, J2)
-    p2 = p_list[1]  # (2, J1, J2)
+    # ========== 制約 ==========
     
-    return status, obj_val, u1, u2, p1, p2
+    # 1. 非負性: u1[j1,j2] >= 0, u2[j1,j2] >= 0
+    # 変数の定義で既に lowBound=0.0 として設定済み
+    
+    # 2. 1-Lipschitz制約: 0 ≤ p1[l,j1,j2] ≤ 1, 0 ≤ p2[l,j1,j2] ≤ 1
+    # 変数の定義で既に lowBound=0.0, upBound=1.0 として設定済み
+    
+    # 3. IC制約（参加者1）: u_1(i) ≥ u_1(j) + p_1(j)(x_1(i) - x_1(j)) ∀i, j
+    # 画像の数式では、他のエージェントの型は固定されていないように見えるが、
+    # 実際には各(j1, j2)の組み合わせに対してIC制約が必要
+    for i1 in range(J1):
+        for j1 in range(J1):
+            for j2 in range(J2):
+                # IC制約: u1(i1, j2) >= u1(j1, j2) + p1(j1, j2)・(x1(i1) - x1(j1))
+                prob += u1[(i1, j2)] >= u1[(j1, j2)] + (
+                    p1[(0, j1, j2)] * points1_diff[i1, j1, 0]  # 財aの項
+                    + p1[(1, j1, j2)] * points1_diff[i1, j1, 1]  # 財bの項
+                ), f"ic1_{i1}_{j1}_{j2}"
+    
+    # 4. IC制約（参加者2）: u_2(i) ≥ u_2(j) + p_2(j)(x_2(i) - x_2(j)) ∀i, j
+    for i2 in range(J2):
+        for j2 in range(J2):
+            for j1 in range(J1):
+                # IC制約: u2(j1, i2) >= u2(j1, j2) + p2(j1, j2)・(x2(i2) - x2(j2))
+                prob += u2[(j1, i2)] >= u2[(j1, j2)] + (
+                    p2[(0, j1, j2)] * points2_diff[i2, j2, 0]  # 財aの項
+                    + p2[(1, j1, j2)] * points2_diff[i2, j2, 1]  # 財bの項
+                ), f"ic2_{j1}_{i2}_{j2}"
+    
+    # 5. Feasibility制約: 0 ≤ u_{1,a}(x) + u_{2,a}(x) ≤ 1
+    #                    0 ≤ u_{1,b}(x) + u_{2,b}(x) ≤ 1
+    # 画像では u_{1,a}(x) と u_{2,a}(x) となっているが、これは配分確率を意味する
+    # つまり、p1[0, j1, j2] + p2[0, j1, j2] ≤ 1
+    for j1 in range(J1):
+        for j2 in range(J2):
+            # 財a: 0 ≤ p1[0,j1,j2] + p2[0,j1,j2] ≤ 1
+            prob += p1[(0, j1, j2)] + p2[(0, j1, j2)] >= 0, f"feasibility_a_{j1}_{j2}_lower"
+            prob += p1[(0, j1, j2)] + p2[(0, j1, j2)] <= 1, f"feasibility_a_{j1}_{j2}_upper"
+            # 財b: 0 ≤ p1[1,j1,j2] + p2[1,j1,j2] ≤ 1
+            prob += p1[(1, j1, j2)] + p2[(1, j1, j2)] >= 0, f"feasibility_b_{j1}_{j2}_lower"
+            prob += p1[(1, j1, j2)] + p2[(1, j1, j2)] <= 1, f"feasibility_b_{j1}_{j2}_upper"
+    
+    # ========== 解く ==========
+    prob.solve(solver)
+    
+    status = pulp.LpStatus[prob.status]
+    obj_val = pulp.value(prob.objective)
+    
+    # ========== 結果 ==========
+    # NumPy配列に変換
+    u1_sol = np.array([[u1[(j1, j2)].varValue for j2 in range(J2)] for j1 in range(J1)], dtype=np.float64)
+    u2_sol = np.array([[u2[(j1, j2)].varValue for j2 in range(J2)] for j1 in range(J1)], dtype=np.float64)
+    p1_sol = np.array([[[p1[(l, j1, j2)].varValue for j2 in range(J2)] for j1 in range(J1)] for l in range(2)], dtype=np.float64)
+    p2_sol = np.array([[[p2[(l, j1, j2)].varValue for j2 in range(J2)] for j1 in range(J1)] for l in range(2)], dtype=np.float64)
+    
+    return status, obj_val, u1_sol, u2_sol, p1_sol, p2_sol
 
 
 def solve_mechanism_multi_agent_iterative(points_list, weights_list, grid_sizes_list, 
