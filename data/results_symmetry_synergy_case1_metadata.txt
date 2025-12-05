@@ -1,7 +1,7 @@
 status: Optimal
-obj_val: 0.887253759999972
-J1: 15625, J2: 15625
-timestamp: 2025-12-03T18:30:04.838066
-grid_sizes1: (25, 25, 25)
-grid_sizes2: (25, 25, 25)
+obj_val: 0.8842703703703432
+J1: 27000, J2: 27000
+timestamp: 2025-12-03T20:58:18.300878
+grid_sizes1: (30, 30, 30)
+grid_sizes2: (30, 30, 30)
 n_iter: 1
