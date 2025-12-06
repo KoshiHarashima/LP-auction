@@ -37,14 +37,68 @@ def beta_pdf(x, a, b):
     return result
 
 
+def mixture_beta_pdf(x, components, range_min=0.0, range_max=1.0):
+    """
+    混合ベータ分布の密度を計算。
+    
+    パラメータ:
+        x: float または np.ndarray, 座標値
+        components: list of dict, 各要素は {'params': (a, b), 'weight': w}
+        range_min: float, 範囲の最小値
+        range_max: float, 範囲の最大値
+    
+    戻り値:
+        density: float または np.ndarray, 密度値
+    """
+    is_scalar = not isinstance(x, np.ndarray)
+    if is_scalar:
+        x = np.array([x])
+    
+    range_diff = range_max - range_min
+    if range_diff == 0:
+        range_diff = 1.0
+    
+    # [0,1]に正規化
+    u = (x - range_min) / range_diff
+    # 範囲外を0に
+    mask = (u >= 0) & (u <= 1)
+    
+    density = np.zeros_like(x)
+    if np.any(mask):
+        u_valid = u[mask]
+        density_valid = np.zeros_like(u_valid)
+        
+        # 各成分の密度を計算して重み付きで合計
+        total_weight = sum(comp['weight'] for comp in components)
+        for comp in components:
+            a, b = comp['params']
+            weight = comp['weight'] / total_weight  # 正規化
+            
+            # Beta分布の密度を計算
+            if HAS_SCIPY:
+                B = beta_func(a, b)
+            else:
+                B = gamma(a) * gamma(b) / gamma(a + b)
+            
+            beta_density = ((u_valid ** (a - 1)) * ((1 - u_valid) ** (b - 1))) / B
+            density_valid += weight * beta_density
+        
+        density[mask] = density_valid / range_diff
+    
+    if is_scalar:
+        return float(density[0])
+    return density
+
+
 def _normalize_dist_param(param, dim_index=0):
     """
-    分布パラメータを正規化する。
+    分布パラメータを正規化する（混合ベータ分布対応版）。
     
     後方互換性のため、以下の形式をサポート：
     - (a, b): ベータ分布、範囲[0, 1]
     - {'type': 'beta', 'params': (a, b), 'range': (min, max)}
     - {'type': 'uniform', 'range': (min, max)}
+    - {'type': 'mixture_beta', 'components': [...], 'range': (min, max)}
     
     戻り値:
         (dist_type, params, range_min, range_max)
@@ -54,13 +108,18 @@ def _normalize_dist_param(param, dim_index=0):
         return 'beta', param, 0.0, 1.0
     elif isinstance(param, dict):
         dist_type = param.get('type', 'beta')
+        range_min, range_max = param.get('range', (0.0, 1.0))
+        
         if dist_type == 'beta':
             params = param.get('params', (1.0, 1.0))
-            range_min, range_max = param.get('range', (0.0, 1.0))
             return 'beta', params, range_min, range_max
         elif dist_type == 'uniform':
-            range_min, range_max = param.get('range', (0.0, 1.0))
             return 'uniform', None, range_min, range_max
+        elif dist_type == 'mixture_beta':
+            components = param.get('components', [])
+            if not components:
+                raise ValueError(f"mixture_beta requires 'components' list at dimension {dim_index}")
+            return 'mixture_beta', components, range_min, range_max
         else:
             raise ValueError(f"Unknown distribution type: {dist_type}")
     else:
@@ -69,7 +128,7 @@ def _normalize_dist_param(param, dim_index=0):
 
 def _generate_coords(n, dist_type, params, range_min, range_max, return_array=False):
     """
-    指定された分布に基づいて座標を生成する。
+    指定された分布に基づいて座標を生成する（混合ベータ分布対応版）。
     
     パラメータ:
         return_array: Trueの場合、NumPy配列を返す（ベクトル化用）
@@ -81,8 +140,8 @@ def _generate_coords(n, dist_type, params, range_min, range_max, return_array=Fa
     cell_size = (range_max - range_min) / n
     range_diff = range_max - range_min
     
-    if dist_type == 'beta':
-        # ベータ分布: [0,1]で生成してから範囲にマッピング
+    if dist_type == 'beta' or dist_type == 'mixture_beta':
+        # ベータ分布または混合ベータ分布: [0,1]で生成してから範囲にマッピング
         # (i + 0.5) / n の形式で生成
         u = (np.arange(n) + 0.5) / n
         coords = range_min + u * range_diff
@@ -100,12 +159,12 @@ def _generate_coords(n, dist_type, params, range_min, range_max, return_array=Fa
 
 def _compute_weight(coord, dist_type, params, range_min, range_max):
     """
-    指定された座標での密度を計算する（スカラーまたは配列対応）。
+    指定された座標での密度を計算する（混合ベータ分布対応版）。
     
     パラメータ:
         coord: float または np.ndarray, 座標値
         dist_type: str, 分布タイプ
-        params: tuple, 分布パラメータ
+        params: tuple または list, 分布パラメータ
         range_min: float, 範囲の最小値
         range_max: float, 範囲の最大値
     
@@ -131,7 +190,10 @@ def _compute_weight(coord, dist_type, params, range_min, range_max):
             # ベクトル化されたbeta_pdf計算
             u_valid = u[mask]
             # Beta分布の密度を計算（範囲のスケーリングを考慮）
-            B = gamma(a) * gamma(b) / gamma(a + b)
+            if HAS_SCIPY:
+                B = beta_func(a, b)
+            else:
+                B = gamma(a) * gamma(b) / gamma(a + b)
             density_valid = ((u_valid ** (a - 1)) * ((1 - u_valid) ** (b - 1))) / B / range_diff
             density[mask] = density_valid
     elif dist_type == 'uniform':
@@ -139,6 +201,10 @@ def _compute_weight(coord, dist_type, params, range_min, range_max):
         mask = (coord >= range_min) & (coord <= range_max)
         density = np.zeros_like(coord)
         density[mask] = 1.0 / range_diff
+    elif dist_type == 'mixture_beta':
+        # 混合ベータ分布
+        components = params
+        density = mixture_beta_pdf(coord, components, range_min, range_max)
     else:
         density = np.zeros_like(coord)
     
@@ -232,6 +298,10 @@ def make_tensor_grid_3d(nx, ny, nz, beta_params=None):
     - 拡張形式: [
         {'type': 'beta', 'params': (a, b), 'range': (min, max)},
         {'type': 'uniform', 'range': (min, max)},
+        {'type': 'mixture_beta', 'components': [
+            {'params': (a1, b1), 'weight': w1},
+            {'params': (a2, b2), 'weight': w2}
+        ], 'range': (min, max)},
         ...
       ]
     

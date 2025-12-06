@@ -2,7 +2,14 @@
 Rochet-Choné型オークション機構設計と最適輸送問題の双対問題
 """
 
-from .utils import beta_pdf, make_tensor_grid_2d, make_tensor_grid_3d, make_tensor_grid_7d, product_beta_density
+from .utils import (
+    beta_pdf, 
+    make_tensor_grid_2d, 
+    make_tensor_grid_3d, 
+    make_tensor_grid_7d, 
+    product_beta_density,
+    mixture_beta_pdf
+)
 from .primal_1agent_2goods_with_synergy import (
     solve_mechanism, 
     solve_mechanism_iterative,
@@ -59,6 +66,7 @@ __all__ = [
     'make_tensor_grid_3d',
     'make_tensor_grid_7d',
     'product_beta_density',
+    'mixture_beta_pdf',
     'solve_mechanism',
     'solve_mechanism_iterative',
     'save_results',
